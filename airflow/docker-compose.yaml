@@ -49,19 +49,19 @@ x-airflow-common:
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
-    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
-    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://airflow:airflow@postgres/airflow
+    AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${PG_USER}:${PG_PASSWORD}@airflow_db/airflow
+    AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${PG_USER}:${PG_PASSWORD}@airflow_db/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
     AIRFLOW__CORE__FERNET_KEY: ''
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__API__AUTH_BACKEND: 'airflow.api.auth.backend.basic_auth'
-    _PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
+    AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: 'true'
+    #_PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
-    - ./shared:/opt/airflow/shared
     - /var/run/docker.sock:/var/run/docker.sock
     - /tmp:/tmp  # https://github.com/apache/airflow/issues/16803
   user: "${AIRFLOW_UID:-50000}:0"
@@ -71,20 +71,20 @@ x-airflow-common:
     &airflow-common-depends-on
     redis:
       condition: service_healthy
-    postgres:
+    airflow_db:
       condition: service_healthy
 
 services:
-  postgres:
+  airflow_db:
     image: postgres:13
     environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
       POSTGRES_DB: airflow
     volumes:
-      - postgres-db-volume:/var/lib/postgresql/data
+      - airflow-db-volume:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "airflow"]
+      test: ["CMD", "pg_isready", "-d", "airflow", "-U", "${PG_USER}", "-h", "localhost"]
       interval: 5s
       retries: 5
     restart: always
@@ -103,8 +103,8 @@ services:
   airflow-webserver:
     <<: *airflow-common
     command: webserver
-    ports:
-      - 8080:8080
+    expose:
+      - "8080"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
       interval: 10s
@@ -230,9 +230,6 @@ services:
         fi
         mkdir -p /sources/logs /sources/dags /sources/plugins
         chown -R "${AIRFLOW_UID}:0" /sources/{logs,dags,plugins}
-        mkdir -p /sources/shared
-        chown -R "${AIRFLOW_UID}:0" /sources/shared
-        chmod -R 777 /sources/shared
         exec /entrypoint airflow version
     # yamllint enable rule:line-length
     environment:
@@ -261,8 +258,8 @@ services:
   flower:
     <<: *airflow-common
     command: celery flower
-    ports:
-      - 5555:5555
+    expose:
+      - "5555"
     healthcheck:
       test: ["CMD", "curl", "--fail", "http://localhost:5555/"]
       interval: 10s
@@ -274,6 +271,80 @@ services:
       airflow-init:
         condition: service_completed_successfully
 
+  s3:
+    image: minio/minio:RELEASE.2020-12-18T03-27-42Z
+    volumes:
+      - minio_data:/data
+    expose:
+      - "9000"
+    environment:
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_ACCESS_KEY}
+    command: server /data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  create-buckets:
+    image: minio/mc:RELEASE.2019-07-17T22-13-42Z
+    depends_on:
+      s3:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c '
+      sleep 5;
+      /usr/bin/mc config host add s3 http://s3:${MINIO_PORT} ${MINIO_ACCESS_KEY} ${MINIO_SECRET_ACCESS_KEY} --api S3v4;
+      [[ ! -z "`/usr/bin/mc ls s3 | grep mlflow`" ]] || /usr/bin/mc mb s3/mlflow;
+      /usr/bin/mc policy download s3/mlflow;
+      exit 0;
+      '
+
+  mlflow-db:
+    image: postgres:13
+    environment:
+      POSTGRES_USER: ${PG_USER}
+      POSTGRES_PASSWORD: ${PG_PASSWORD}
+      POSTGRES_DB: mlflow
+    volumes:
+      - mlflow-db-volume:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-d", "mlflow", "-U", "${PG_USER}", "-h", "localhost"]
+      interval: 5s
+      retries: 5
+    restart: always
+
+  tracking-server:
+    restart: always
+    build: ../docker/mlflow
+    expose:
+      - "5000"
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY}
+      - MLFLOW_S3_ENDPOINT_URL=http://s3:${MINIO_PORT}
+    command: >
+      mlflow server
+      --backend-store-uri postgresql+psycopg2://${PG_USER}:${PG_PASSWORD}@mlflow-db:${PG_PORT}/mlflow
+      --host 0.0.0.0
+      --default-artifact-root s3://mlflow-db/
+#
+  nginx:
+    image: nginx:1.21
+    ports:
+      - "${MINIO_PORT}:9000"
+      - "${MLFLOW_PORT}:5000"
+      - "${AIRFLOW_PORT}:8080"
+    depends_on:
+      - tracking-server
+      - s3
+      - airflow-webserver
+    volumes:
+    - ./nginx.conf:/etc/nginx/nginx.conf
+
 volumes:
-  postgres-db-volume:
+  airflow-db-volume:
+  mlflow-db-volume:
+  minio_data:
   
