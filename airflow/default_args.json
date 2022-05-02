@@ -1,0 +1,162 @@
+{
+  "model_name": "baseline",
+  "model_version": 1,
+  "dataset_parameters": {
+    "sample": 10
+  },
+  "model_config": {
+    "latent_dim": 32,
+    "batch_size": 32,
+    "lr": 0.0001,
+    "lr_schedule_rate": 0.999,
+    "num_disc_updates": 8,
+    "gp_lambda": 10,
+    "gpdata_lambda": 0,
+    "cramer": false,
+    "stochastic_stepping": true,
+    "save_every": 2,
+    "num_epochs": 4,
+    "feature_noise_power": null,
+    "feature_noise_decay": null,
+    "data_version": "data_v4",
+    "pad_range": [
+      -3,
+      5
+    ],
+    "time_range": [
+      -7,
+      9
+    ],
+    "scaler": "logarithmic",
+    "architecture": {
+      "generator": [
+        {
+          "block_type": "fully_connected",
+          "arguments": {
+            "units": [
+              32,
+              64,
+              64,
+              64,
+              128
+            ],
+            "activations": [
+              "elu",
+              "elu",
+              "elu",
+              "elu",
+              " ( lambda x, shift=0.01, val=np.log10(2), v0=np.log10(2) / 10: ( tf.where( x > shift, val + x - shift, v0 + tf.keras.activations.elu( x, alpha=(v0 * shift / (val - v0)) ) * (val - v0) / shift ) ) )"
+            ],
+            "kernel_init": "glorot_uniform",
+            "input_shape": [
+              37
+            ],
+            "output_shape": [
+              8,
+              16
+            ],
+            "name": "generator"
+          }
+        }
+      ],
+      "discriminator": [
+        {
+          "block_type": "connect",
+          "arguments": {
+            "vector_shape": [
+              5
+            ],
+            "img_shape": [
+              8,
+              16
+            ],
+            "vector_bypass": false,
+            "concat_outputs": true,
+            "name": "discriminator_tail",
+            "block": {
+              "block_type": "conv",
+              "arguments": {
+                "filters": [
+                  16,
+                  16,
+                  32,
+                  32,
+                  64,
+                  64
+                ],
+                "kernel_sizes": [
+                  3,
+                  3,
+                  3,
+                  3,
+                  3,
+                  2
+                ],
+                "paddings": [
+                  "same",
+                  "same",
+                  "same",
+                  "same",
+                  "valid",
+                  "valid"
+                ],
+                "activations": [
+                  "elu",
+                  "elu",
+                  "elu",
+                  "elu",
+                  "elu",
+                  "elu"
+                ],
+                "poolings": [
+                  null,
+                  [
+                    1,
+                    2
+                  ],
+                  null,
+                  2,
+                  null,
+                  null
+                ],
+                "kernel_init": "glorot_uniform",
+                "input_shape": null,
+                "output_shape": [
+                  64
+                ],
+                "dropouts": [
+                  0.02,
+                  0.02,
+                  0.02,
+                  0.02,
+                  0.02,
+                  0.02
+                ],
+                "name": "discriminator_conv_block"
+              }
+            }
+          }
+        },
+        {
+          "block_type": "fully_connected",
+          "arguments": {
+            "units": [
+              128,
+              1
+            ],
+            "activations": [
+              "elu",
+              null
+            ],
+            "kernel_init": "glorot_uniform",
+            "input_shape": [
+              69
+            ],
+            "output_shape": null,
+            "name": "discriminator_head"
+          }
+        }
+      ]
+    }
+  }
+}

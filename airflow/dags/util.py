@@ -10,44 +10,87 @@ from airflow import AirflowException
 from airflow.hooks.base import BaseHook
 from airflow.providers.docker.operators.docker import DockerOperator, stringify
 from airflow.utils.context import Context
+from airflow.models import Param
 from docker.types import DeviceRequest, Mount
 
 
-COMMON_DEFAULT_ARGS = {
-    # dataset parameters hash
-    'dataset_dir': '{{ dict_hash(dag_run.conf["dataset_parameters"]) }}',
-    # dataset + model parameters hash
-    'model_dir': '{{ dict_hash({"dataset_parameters": dag_run.conf["dataset_parameters"],'
-                       ' "model_config": dag_run.conf["model_config"]}) }}',
-    'saved_models_bucket': '{{ var.value.saved_models_bucket }}',
-    'datasets_bucket': '{{ var.value.datasets_bucket }}',
-    'evaluation_results_bucket': '{{ var.value.evaluation_results_bucket }}',
-    's3_host': '{{ get_aws_credentials()["host"] }}',
-    'mlflow_port': '{{ var.value.mlflow_tracking_port }}',
-    's3_port': '{{ get_aws_credentials()["port"] }}',
-    's3_access_key': '{{ get_aws_credentials()["aws_access_key_id"] }}',
-    's3_secret_access_key': '{{ get_aws_credentials()["aws_secret_access_key"] }}',
-}
+def get_aws_credentials():
+    from urllib.parse import urlparse
+
+    credentials = json.loads(BaseHook.get_connection('S3').get_extra())
+    parsed = urlparse(credentials['host'])
+    credentials['hostname'] = parsed.hostname
+    credentials['port'] = parsed.port
+    return credentials
+
+
+
+class Constants:
+    airflow_bucket = '{{ var.value.airflow_bucket }}'
+    saved_models_bucket = '{{ var.value.saved_models_bucket }}'
+    datasets_bucket = '{{ var.value.datasets_bucket }}'
+    evaluation_results_bucket = '{{ var.value.evaluation_results_bucket }}'
+    s3_hostname = get_aws_credentials()['hostname']
+    s3_port = get_aws_credentials()['port']
+    s3_host = get_aws_credentials()['host']
+    mlflow_hostname = '{{ var.value.mlflow_host }}'
+    mlflow_port = '{{ var.value.mlflow_tracking_port }}'
+    mlflow_host = 'http://{{ var.value.mlflow_host }}:{{ var.value.mlflow_tracking_port }}'
+    s3_access_key = get_aws_credentials()["aws_access_key_id"]
+    s3_secret_access_key = get_aws_credentials()["aws_secret_access_key"]
 
 
 def dict_hash(params):
     import uuid
-
     return str(uuid.uuid5(uuid.NAMESPACE_OID, json.dumps(params, sort_keys=True)))
 
 
-def get_aws_credentials():
-    credentials = json.loads(BaseHook.get_connection('S3').get_extra())
-    credentials['port'] = credentials['host'][credentials['host'].rfind(':') + 1:]
-    credentials['host'] = credentials['host'][:credentials['host'].rfind(':')]
-    return credentials
+USER_DEFINED_MACROS = {
+    'dict_hash': dict_hash,
+    'get_aws_credentials': get_aws_credentials,
+}
+
+
+class Templates:
+    @classmethod
+    def dataset_dir(cls, dataset_parameters_template: str):
+        dataset_parameters_template = dataset_parameters_template.lstrip('{').rstrip('}')
+        return f'{{{{ dict_hash({dataset_parameters_template}) }}}}'
+
+    @classmethod
+    def model_dir(cls, dataset_parameters_template: str, model_config_template: str):
+        dataset_parameters_template = dataset_parameters_template.lstrip('{').rstrip('}')
+        model_config_template = model_config_template.lstrip('{').rstrip('}')
+        dict_template = f"{{'dataset_params': {dataset_parameters_template}, 'model_config': {model_config_template}}}"
+        return f'{{{{ dict_hash({dict_template}) }}}}'
+
+
+@dataclasses.dataclass
+class DagRunParam:
+    name: str
+    dag_param: Param
+
+    @property
+    def template(self):
+        return f'{{{{ dag_run.conf["{self.name}"] }}}}'
+
+
+class DagRunParamsDict:
+    def __init__(self, *params: DagRunParam):
+        self.params = {param.name: param for param in params}
+
+    def dag_params_view(self):
+        return {param_name: param.dag_param for param_name, param in self.params.items()}
+
+    def __getitem__(self, item):
+        return self.params[item].template
 
 
 def s3_to_local_folder(s3_conn_id: str, s3_bucket: str, s3_path: Union[PosixPath, str], local_path: Path):
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
     s3 = S3Hook(s3_conn_id)
-    s3_path = PosixPath(s3_path)
+    s3_path = PosixPath(s3_path).relative_to('/')
 
     local_path.mkdir(parents=True, exist_ok=True)
 
@@ -86,22 +129,22 @@ class DockerOperatorRemoteMapping:
     bucket: str
     remote_path: str
     mount_path: str
+    sync_on_start: bool = False
+    sync_on_finish: bool = False
 
 
 class DockerOperatorExtended(DockerOperator):
-    template_fields = (*DockerOperator.template_fields, 'input_remote_mappings', 'output_remote_mappings', 'mounts')
+    template_fields = (*DockerOperator.template_fields, 'remote_mappings', 'mounts')
 
     def __init__(
         self,
-        input_remote_mappings: List[DockerOperatorRemoteMapping] = None,
-        output_remote_mappings: List[DockerOperatorRemoteMapping] = None,
+        remote_mappings: List[DockerOperatorRemoteMapping] = None,
         device_requests: List[DeviceRequest] = None,
         map_output_on_fail=False,
         **kwargs
     ):
         self.map_output_on_fail = map_output_on_fail
-        self.input_remote_mappings = input_remote_mappings or []
-        self.output_remote_mappings = output_remote_mappings or []
+        self.remote_mappings = remote_mappings or []
         mounts = kwargs.get('mounts', [])
 
         mounts.append(Mount(source='/etc/passwd', target='/etc/passwd', read_only=True, type='bind'))
@@ -120,21 +163,14 @@ class DockerOperatorExtended(DockerOperator):
     def execute(self, context: 'Context') -> Optional[str]:
         initial_mounts = list(self.mounts)
 
-        input_tmp_dirs_to_mappings = {}
-        for mapping in self.input_remote_mappings:
-            input_tmp_dir = Path(tempfile.mkdtemp(dir=self.host_tmp_dir))
-            input_tmp_dirs_to_mappings[input_tmp_dir] = mapping
-            s3_to_local_folder('S3', mapping.bucket, mapping.remote_path, input_tmp_dir)
+        tmp_dirs_to_mappings = {}
+        for mapping in self.remote_mappings:
+            tmp_dir = Path(tempfile.mkdtemp(dir=self.host_tmp_dir))
+            tmp_dirs_to_mappings[tmp_dir] = mapping
+            if mapping.sync_on_start:
+                s3_to_local_folder('S3', mapping.bucket, mapping.remote_path, tmp_dir)
             self.mounts.append(
-                Mount(source=str(input_tmp_dir), target=str(mapping.mount_path), type='bind')
-            )
-
-        output_tmp_dirs_to_mappings = {}
-        for mapping in self.output_remote_mappings:
-            output_tmp_dir = Path(tempfile.mkdtemp(dir=self.host_tmp_dir))
-            output_tmp_dirs_to_mappings[output_tmp_dir] = mapping
-            self.mounts.append(
-                Mount(source=str(output_tmp_dir), target=str(mapping.mount_path), type='bind')
+                Mount(source=str(tmp_dir), target=str(mapping.mount_path), type='bind')
             )
 
         failed = True
@@ -144,11 +180,10 @@ class DockerOperatorExtended(DockerOperator):
             failed = False
         finally:
             if not failed or self.map_output_on_fail:
-                for tmp_dir in input_tmp_dirs_to_mappings:
-                    shutil.rmtree(tmp_dir)
-                for tmp_dir, mapping in output_tmp_dirs_to_mappings.items():
-                    for subfolder in tmp_dir.iterdir():
-                        local_folder_to_s3('S3', mapping.bucket, mapping.remote_path, subfolder)
+                for tmp_dir, mapping in tmp_dirs_to_mappings.items():
+                    if mapping.sync_on_finish:
+                        for subfolder in tmp_dir.iterdir():
+                            local_folder_to_s3('S3', mapping.bucket, mapping.remote_path, subfolder)
                     shutil.rmtree(tmp_dir)
 
         self.mounts = initial_mounts

@@ -44,20 +44,27 @@ x-airflow-common:
   # In order to add custom dependencies or upgrade provider packages you can use your extended image.
   # Comment the image line, place your Dockerfile in the directory where you placed the docker-compose.yaml
   # and uncomment the "build" line below, Then run `docker-compose build` to build the images.
-  image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.2.5}
-  # build: .
+  # image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.2.5}
+  build: .
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
     AIRFLOW__CORE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${PG_USER}:${PG_PASSWORD}@airflow_db/airflow
     AIRFLOW__CELERY__RESULT_BACKEND: db+postgresql://${PG_USER}:${PG_PASSWORD}@airflow_db/airflow
     AIRFLOW__CELERY__BROKER_URL: redis://:@redis:6379/0
-    AIRFLOW__CORE__FERNET_KEY: ''
-    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'true'
-    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
-    AIRFLOW__API__AUTH_BACKEND: 'airflow.api.auth.backend.basic_auth'
-    AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: 'true'
-    #_PIP_ADDITIONAL_REQUIREMENTS: ${_PIP_ADDITIONAL_REQUIREMENTS:-}
+    AIRFLOW__CORE__FERNET_KEY: ""
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
+    AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+    AIRFLOW__API__AUTH_BACKEND: "airflow.api.auth.backend.basic_auth"
+    AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: "true"
+    AIRFLOW_VAR_AIRFLOW_BUCKET: "${AIRFLOW_BUCKET}"
+    AIRFLOW_VAR_DATASETS_BUCKET: "${DATASETS_BUCKET}"
+    AIRFLOW_VAR_SAVED_MODELS_BUCKET: "${SAVED_MODELS_BUCKET}"
+    AIRFLOW_VAR_EVALUATION_RESULTS_BUCKET: "${EVALUATION_RESULTS_BUCKET}"
+    AIRFLOW_VAR_MLFLOW_HOST: "tracking-server"
+    AIRFLOW_VAR_MLFLOW_TRACKING_PORT: "${MLFLOW_PORT}"
+    AIRFLOW_VAR_CONTAINER_REGISTRY: "localhost:${CONTAINER_REGISTRY_PORT}"
+    AIRFLOW_CONN_S3: "s3:///?aws_access_key_id=${MINIO_ACCESS_KEY}&aws_secret_access_key=${MINIO_SECRET_ACCESS_KEY}&host=http://s3:${MINIO_PORT}"
   volumes:
     - ./dags:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
@@ -234,10 +241,10 @@ services:
     # yamllint enable rule:line-length
     environment:
       <<: *airflow-common-env
-      _AIRFLOW_DB_UPGRADE: 'true'
-      _AIRFLOW_WWW_USER_CREATE: 'true'
-      _AIRFLOW_WWW_USER_USERNAME: ${_AIRFLOW_WWW_USER_USERNAME:-airflow}
-      _AIRFLOW_WWW_USER_PASSWORD: ${_AIRFLOW_WWW_USER_PASSWORD:-airflow}
+      _AIRFLOW_DB_UPGRADE: "true"
+      _AIRFLOW_WWW_USER_CREATE: "true"
+      _AIRFLOW_WWW_USER_USERNAME: ${AIRFLOW_USER}
+      _AIRFLOW_WWW_USER_PASSWORD: ${AIRFLOW_PASSWORD}
     user: "0:0"
     volumes:
       - .:/sources
@@ -274,7 +281,7 @@ services:
   s3:
     image: minio/minio:RELEASE.2020-12-18T03-27-42Z
     volumes:
-      - minio_data:/data
+      - minio-data:/data
     expose:
       - "9000"
     environment:
@@ -294,10 +301,14 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c '
-      sleep 5;
       /usr/bin/mc config host add s3 http://s3:${MINIO_PORT} ${MINIO_ACCESS_KEY} ${MINIO_SECRET_ACCESS_KEY} --api S3v4;
       [[ ! -z "`/usr/bin/mc ls s3 | grep mlflow`" ]] || /usr/bin/mc mb s3/mlflow;
       /usr/bin/mc policy download s3/mlflow;
+      [[ ! -z "`/usr/bin/mc ls s3 | grep saved-models`" ]] || /usr/bin/mc mb s3/saved-models;
+      [[ ! -z "`/usr/bin/mc ls s3 | grep datasets`" ]] || /usr/bin/mc mb s3/datasets;
+      [[ ! -z "`/usr/bin/mc ls s3 | grep evaluation-results`" ]] || /usr/bin/mc mb s3/evaluation-results;
+      [[ ! -z "`/usr/bin/mc ls s3 | grep airflow`" ]] || /usr/bin/mc mb s3/airflow;
+      [[ ! -z "`/usr/bin/mc ls s3 | grep tensorboard`" ]] || /usr/bin/mc mb s3/tensorboard;
       exit 0;
       '
 
@@ -328,8 +339,8 @@ services:
       mlflow server
       --backend-store-uri postgresql+psycopg2://${PG_USER}:${PG_PASSWORD}@mlflow-db:${PG_PORT}/mlflow
       --host 0.0.0.0
-      --default-artifact-root s3://mlflow-db/
-#
+      --default-artifact-root s3://mlflow/
+
   nginx:
     image: nginx:1.21
     ports:
@@ -343,8 +354,45 @@ services:
     volumes:
     - ./nginx.conf:/etc/nginx/nginx.conf
 
+#  container-registry:
+#    restart: always
+#    build:
+#      context: ../docker/registry
+#      network: host
+#    healthcheck:
+#      test: [ "CMD", "curl", "--fail", "http://localhost:5000/v2" ]
+#      interval: 10s
+#      timeout: 10s
+#      retries: 5
+#    ports:
+#      - "${CONTAINER_REGISTRY_PORT}:5000"
+
+#  mpdroot:
+#    build: ../docker/tpc-trainer
+#    image: container-registry/tpc-trainer:latest
+#    depends_on:
+#      container-registry:
+#        condition: service_healthy
+
+#  build-and-push:
+#    image: docker:latest
+#    depends_on:
+#      container-registry:
+#        condition: service_healthy
+#    volumes:
+#      - ../docker:/docker
+#      - /var/run/docker.sock:/var/run/docker.sock
+#    entrypoint: >
+#      sh -c "docker build -t localhost:${CONTAINER_REGISTRY_PORT}/tpc-trainer /docker/tpc-trainer &&
+#            docker push localhost:${CONTAINER_REGISTRY_PORT}/tpc-trainer &&
+#            docker build -t localhost:${CONTAINER_REGISTRY_PORT}/mpdroot /docker/mpdroot &&
+#            docker push localhost:${CONTAINER_REGISTRY_PORT}/mpdroot"
+
 volumes:
   airflow-db-volume:
   mlflow-db-volume:
-  minio_data:
-  
+  minio-data:
+
+networks:
+  default:
+    name: airflow-network
