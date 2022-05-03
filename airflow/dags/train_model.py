@@ -111,7 +111,15 @@ def create_train_model_dag(dag_id='train-model'):
             'image': 'alexdrydew/tpc-trainer',
             'docker_url': 'unix://var/run/docker.sock',
             'device_requests': [DeviceRequest(capabilities=[['gpu']], count=1)],
-            'map_output_on_fail': True
+            'map_output_on_fail': True,
+            'network_mode': 'airflow-network',
+            'environment': {
+                'AWS_ACCESS_KEY_ID': Constants.s3_access_key,
+                'AWS_SECRET_ACCESS_KEY': Constants.s3_secret_access_key,
+                'S3_ENDPOINT': f'{Constants.s3_hostname}:{Constants.s3_port}',
+                'S3_USE_HTTPS': 0,
+                'S3_VERIFY_SSL': 0,
+            }
         }
 
         train_model_operator_from_start = DockerOperatorExtended(
@@ -133,7 +141,8 @@ def create_train_model_dag(dag_id='train-model'):
             ],
             command=[
                 'sh', '-c',
-                'python run_model_v4.py --checkpoint_name model --config models/configs/model.yaml',
+                f'python run_model_v4.py --checkpoint_name {params["model_name"]}_{model_dir_template} '
+                f'--config models/configs/model.yaml --logging_dir s3://{Constants.tensorboard_bucket}/logs',
             ],
         )
         train_model_operator_continue = DockerOperatorExtended(
@@ -155,7 +164,8 @@ def create_train_model_dag(dag_id='train-model'):
             ],
             command=[
                 'sh', '-c',
-                'python run_model_v4.py --checkpoint_name model',
+                f'python run_model_v4.py --checkpoint_name {params["model_name"]}_{dataset_dir_template} '
+                f'--logging_dir s3://{Constants.tensorboard_bucket}/logs',
             ],
         )
 

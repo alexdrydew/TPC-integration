@@ -72,7 +72,7 @@ def create_convert_and_upload_model_dag(dag_id='convert-and-upload-model'):
             command=[
                 'sh', '-c',
                 'python export_model.py '
-                '--checkpoint_name model '
+                f'--checkpoint_name {params["model_name"]}_{params["saved_model_dir"]} '
                 '--export_format onnx '
                 '--upload_to_mlflow '
                 f'--aws_access_key_id {Constants.s3_access_key} '

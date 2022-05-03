@@ -15,7 +15,7 @@ DEFAULT_ARGS = {
 
 
 def update_mlflow_description(
-    model_name, model_version, evaluation_results_bucket, evaluation_results_dir, mlflow_host, s3_host
+    model_name, model_version, evaluation_results_bucket, evaluation_results_dir, mlflow_host, reverse_proxy_s3_host
 ):
     import mlflow
     from io import StringIO
@@ -23,7 +23,7 @@ def update_mlflow_description(
 
     def create_description():
         sio = StringIO()
-        sio.write(f'![]({s3_host}/{evaluation_results_bucket}/{evaluation_results_dir}/test_results.png)\n')
+        sio.write(f'![]({reverse_proxy_s3_host}/{evaluation_results_bucket}/{evaluation_results_dir}/test_results.png)\n')
         sio.write('Some data...')
         return sio.getvalue()
 
@@ -91,7 +91,7 @@ def create_evaluate_model_dag(dag_id='evaluate-model'):
                 'evaluation_results_bucket': Constants.evaluation_results_bucket,
                 'evaluation_results_dir': evaluation_results_dir_template,
                 'mlflow_host': Constants.mlflow_host,
-                's3_host': Constants.s3_host,
+                'reverse_proxy_s3_host': Constants.reverse_proxy_s3_host,
             }
         )
 

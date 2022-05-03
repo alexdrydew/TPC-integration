@@ -30,6 +30,7 @@ class Constants:
     saved_models_bucket = '{{ var.value.saved_models_bucket }}'
     datasets_bucket = '{{ var.value.datasets_bucket }}'
     evaluation_results_bucket = '{{ var.value.evaluation_results_bucket }}'
+    tensorboard_bucket = '{{ var.value.tensorboard_bucket }}'
     s3_hostname = get_aws_credentials()['hostname']
     s3_port = get_aws_credentials()['port']
     s3_host = get_aws_credentials()['host']
@@ -38,6 +39,7 @@ class Constants:
     mlflow_host = 'http://{{ var.value.mlflow_host }}:{{ var.value.mlflow_tracking_port }}'
     s3_access_key = get_aws_credentials()["aws_access_key_id"]
     s3_secret_access_key = get_aws_credentials()["aws_secret_access_key"]
+    reverse_proxy_s3_host = 'http://{{ var.value.reverse_proxy_host }}:{{ var.value.reverse_proxy_s3_port }}'
 
 
 def dict_hash(params):

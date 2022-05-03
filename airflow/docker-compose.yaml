@@ -63,7 +63,9 @@ x-airflow-common:
     AIRFLOW_VAR_EVALUATION_RESULTS_BUCKET: "${EVALUATION_RESULTS_BUCKET}"
     AIRFLOW_VAR_MLFLOW_HOST: "tracking-server"
     AIRFLOW_VAR_MLFLOW_TRACKING_PORT: "${MLFLOW_PORT}"
-    AIRFLOW_VAR_CONTAINER_REGISTRY: "localhost:${CONTAINER_REGISTRY_PORT}"
+    AIRFLOW_VAR_TENSORBOARD_BUCKET: "${TENSORBOARD_BUCKET}"
+    AIRFLOW_VAR_REVERSE_PROXY_HOST: "${REVERSE_PROXY_HOST}"
+    AIRFLOW_VAR_REVERSE_PROXY_S3_PORT: "${REVERSE_PROXY_S3_PORT}"
     AIRFLOW_CONN_S3: "s3:///?aws_access_key_id=${MINIO_ACCESS_KEY}&aws_secret_access_key=${MINIO_SECRET_ACCESS_KEY}&host=http://s3:${MINIO_PORT}"
   volumes:
     - ./dags:/opt/airflow/dags
@@ -304,11 +306,11 @@ services:
       /usr/bin/mc config host add s3 http://s3:${MINIO_PORT} ${MINIO_ACCESS_KEY} ${MINIO_SECRET_ACCESS_KEY} --api S3v4;
       [[ ! -z "`/usr/bin/mc ls s3 | grep mlflow`" ]] || /usr/bin/mc mb s3/mlflow;
       /usr/bin/mc policy download s3/mlflow;
-      [[ ! -z "`/usr/bin/mc ls s3 | grep saved-models`" ]] || /usr/bin/mc mb s3/saved-models;
-      [[ ! -z "`/usr/bin/mc ls s3 | grep datasets`" ]] || /usr/bin/mc mb s3/datasets;
-      [[ ! -z "`/usr/bin/mc ls s3 | grep evaluation-results`" ]] || /usr/bin/mc mb s3/evaluation-results;
-      [[ ! -z "`/usr/bin/mc ls s3 | grep airflow`" ]] || /usr/bin/mc mb s3/airflow;
-      [[ ! -z "`/usr/bin/mc ls s3 | grep tensorboard`" ]] || /usr/bin/mc mb s3/tensorboard;
+      [[ ! -z "`/usr/bin/mc ls s3 | grep ${SAVED_MODELS_BUCKET}`" ]] || /usr/bin/mc mb s3/${SAVED_MODELS_BUCKET};
+      [[ ! -z "`/usr/bin/mc ls s3 | grep ${DATASETS_BUCKET}`" ]] || /usr/bin/mc mb s3/${DATASETS_BUCKET};
+      [[ ! -z "`/usr/bin/mc ls s3 | grep ${EVALUATION_RESULTS_BUCKET}`" ]] || /usr/bin/mc mb s3/${EVALUATION_RESULTS_BUCKET};
+      [[ ! -z "`/usr/bin/mc ls s3 | grep ${AIRFLOW_BUCKET}`" ]] || /usr/bin/mc mb s3/${AIRFLOW_BUCKET};
+      [[ ! -z "`/usr/bin/mc ls s3 | grep ${TENSORBOARD_BUCKET}`" ]] || /usr/bin/mc mb s3/${TENSORBOARD_BUCKET};
       exit 0;
       '
 
@@ -341,52 +343,33 @@ services:
       --host 0.0.0.0
       --default-artifact-root s3://mlflow/
 
+  tensorboard:
+    restart: always
+    build: ../docker/tensorboard
+    expose:
+      - "6006"
+    environment:
+      - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
+      - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY}
+      - S3_ENDPOINT=http://s3:${MINIO_PORT}
+      - S3_VERIFY_SSL=0
+      - S3_USE_HTTPS=0
+    command:
+      --logdir s3://${TENSORBOARD_BUCKET}/logs --host 0.0.0.0
+
   nginx:
     image: nginx:1.21
     ports:
       - "${MINIO_PORT}:9000"
       - "${MLFLOW_PORT}:5000"
       - "${AIRFLOW_PORT}:8080"
+      - "${TENSORBOARD_PORT}:6006"
     depends_on:
       - tracking-server
       - s3
       - airflow-webserver
     volumes:
     - ./nginx.conf:/etc/nginx/nginx.conf
-
-#  container-registry:
-#    restart: always
-#    build:
-#      context: ../docker/registry
-#      network: host
-#    healthcheck:
-#      test: [ "CMD", "curl", "--fail", "http://localhost:5000/v2" ]
-#      interval: 10s
-#      timeout: 10s
-#      retries: 5
-#    ports:
-#      - "${CONTAINER_REGISTRY_PORT}:5000"
-
-#  mpdroot:
-#    build: ../docker/tpc-trainer
-#    image: container-registry/tpc-trainer:latest
-#    depends_on:
-#      container-registry:
-#        condition: service_healthy
-
-#  build-and-push:
-#    image: docker:latest
-#    depends_on:
-#      container-registry:
-#        condition: service_healthy
-#    volumes:
-#      - ../docker:/docker
-#      - /var/run/docker.sock:/var/run/docker.sock
-#    entrypoint: >
-#      sh -c "docker build -t localhost:${CONTAINER_REGISTRY_PORT}/tpc-trainer /docker/tpc-trainer &&
-#            docker push localhost:${CONTAINER_REGISTRY_PORT}/tpc-trainer &&
-#            docker build -t localhost:${CONTAINER_REGISTRY_PORT}/mpdroot /docker/mpdroot &&
-#            docker push localhost:${CONTAINER_REGISTRY_PORT}/mpdroot"
 
 volumes:
   airflow-db-volume:

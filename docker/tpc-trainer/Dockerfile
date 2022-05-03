@@ -12,7 +12,12 @@ RUN apt-get update && apt-get install -y git
 WORKDIR /
 RUN git clone https://github.com/SiLiKhon/TPC-FastSim.git
 WORKDIR TPC-FastSim
+RUN git config user.name 'docker'
+RUN git config user.email 'docker@example.com'
+# model export support
 RUN git reset --hard 7de367f
+# custom logs folder support
+RUN git cherry-pick 89d6d2e
 RUN chmod -R 777 /TPC-FastSim
 COPY /entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
