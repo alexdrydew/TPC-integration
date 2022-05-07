@@ -7,7 +7,15 @@ from airflow.models import Param
 from docker.types import DeviceRequest
 from pathlib import Path
 from get_dataset import create_get_dataset_operators
-from util import DockerOperatorExtended, DockerOperatorRemoteMapping, Constants, Templates, USER_DEFINED_MACROS, DagRunParam, DagRunParamsDict
+from util import (
+    DockerOperatorExtended,
+    DockerOperatorRemoteMapping,
+    Constants,
+    Templates,
+    USER_DEFINED_MACROS,
+    DagRunParam,
+    DagRunParamsDict,
+)
 
 
 DEFAULT_ARGS = {
@@ -15,7 +23,7 @@ DEFAULT_ARGS = {
 }
 
 
-def create_config(model_config, model_dir):
+def create_config(model_config, model_dir, airflow_bucket):
     import yaml
     import tempfile
     from util import local_folder_to_s3
@@ -26,7 +34,9 @@ def create_config(model_config, model_dir):
         with open(file_dir / 'models' / 'configs' / 'model.yaml', 'w') as f:
             yaml.dump(model_config, f, default_flow_style=False)
 
-        local_folder_to_s3('S3', 'airflow', s3_path=f'/tmp/{model_dir}', local_path=file_dir / 'models')
+        local_folder_to_s3(
+            'S3', airflow_bucket, s3_path=f'/tmp/{model_dir}', local_path=file_dir / 'models'
+        )
 
 
 def copy_model_to_done_folder(model_dir, saved_models_bucket, dataset_parameters):
@@ -35,10 +45,14 @@ def copy_model_to_done_folder(model_dir, saved_models_bucket, dataset_parameters
     from util import local_folder_to_s3
 
     s3_hook = S3Hook(aws_conn_id='S3')
-    for key in s3_hook.list_keys(bucket_name=saved_models_bucket, prefix=f'intermediate/{model_dir}'):
+    for key in s3_hook.list_keys(
+        bucket_name=saved_models_bucket, prefix=f'intermediate/{model_dir}'
+    ):
         s3_hook.copy_object(
-            source_bucket_name=saved_models_bucket, dest_bucket_name=saved_models_bucket,
-            source_bucket_key=key, dest_bucket_key=key.replace('intermediate', 'done'),
+            source_bucket_name=saved_models_bucket,
+            dest_bucket_name=saved_models_bucket,
+            source_bucket_key=key,
+            dest_bucket_key=key.replace('intermediate', 'done'),
         )
 
     with tempfile.TemporaryDirectory() as file_dir:
@@ -46,14 +60,21 @@ def copy_model_to_done_folder(model_dir, saved_models_bucket, dataset_parameters
         with open(file_dir / 'dataset.yaml', 'w') as f:
             yaml.dump(dataset_parameters, f, default_flow_style=False)
 
-        local_folder_to_s3('S3', saved_models_bucket, s3_path=f'/done/{model_dir}', local_path=file_dir / 'dataset.yaml')
+        local_folder_to_s3(
+            'S3',
+            saved_models_bucket,
+            s3_path=f'/done/{model_dir}',
+            local_path=file_dir / 'dataset.yaml',
+        )
 
 
 def decide_if_continue(ignore_saves, model_dir, saved_models_bucket):
     s3_hook = S3Hook(aws_conn_id='S3')
 
     if ignore_saves or not s3_hook.check_for_prefix(
-            bucket_name=saved_models_bucket, prefix=f'intermediate/{model_dir}', delimiter='/'
+        bucket_name=saved_models_bucket,
+        prefix=f'intermediate/{model_dir}',
+        delimiter='/',
     ):
         return 'prepare-config'
     return 'train-model-continue'
@@ -62,10 +83,12 @@ def decide_if_continue(ignore_saves, model_dir, saved_models_bucket):
 def create_train_model_dag(dag_id='train-model'):
 
     params = DagRunParamsDict(
-        DagRunParam(name='ignore_saves', dag_param=Param(default=False, type='boolean')),
-        DagRunParam(name='dataset_parameters', dag_param=Param()),
-        DagRunParam(name='model_config', dag_param=Param()),
-        DagRunParam(name='model_name', dag_param=Param(type='string')),
+        DagRunParam(
+            name='ignore_saves', dag_param=Param(default=False, type='boolean')
+        ),
+        DagRunParam(name='dataset_parameters', dag_param=Param(default=dict(), type='object')),
+        DagRunParam(name='model_config', dag_param=Param(default=dict(), type='object')),
+        DagRunParam(name='model_name', dag_param=Param(default='', type='string')),
     )
 
     dag = DAG(
@@ -81,7 +104,9 @@ def create_train_model_dag(dag_id='train-model'):
     with dag:
 
         dataset_dir_template = Templates.dataset_dir(params['dataset_parameters'])
-        model_dir_template = Templates.model_dir(params['dataset_parameters'], params['model_config'])
+        model_dir_template = Templates.model_dir(
+            params['dataset_parameters'], params['model_config']
+        )
 
         get_dataset_operator = create_get_dataset_operators(dag, params)
 
@@ -92,7 +117,8 @@ def create_train_model_dag(dag_id='train-model'):
             op_kwargs={
                 'model_config': params['model_config'],
                 'model_dir': model_dir_template,
-            }
+                'airflow_bucket': Constants.airflow_bucket,
+            },
         )
 
         decide_if_continue_operator = BranchPythonOperator(
@@ -102,8 +128,8 @@ def create_train_model_dag(dag_id='train-model'):
             op_kwargs={
                 'ignore_saves': params['ignore_saves'],
                 'model_dir': model_dir_template,
-                'saved_models_bucket': Constants.saved_models_bucket
-            }
+                'saved_models_bucket': Constants.saved_models_bucket,
+            },
         )
 
         common_train_args = {
@@ -119,7 +145,7 @@ def create_train_model_dag(dag_id='train-model'):
                 'S3_ENDPOINT': f'{Constants.s3_hostname}:{Constants.s3_port}',
                 'S3_USE_HTTPS': 0,
                 'S3_VERIFY_SSL': 0,
-            }
+            },
         }
 
         train_model_operator_from_start = DockerOperatorExtended(
@@ -127,20 +153,27 @@ def create_train_model_dag(dag_id='train-model'):
             **common_train_args,
             remote_mappings=[
                 DockerOperatorRemoteMapping(
-                    bucket=Constants.airflow_bucket, remote_path=f'/tmp/{model_dir_template}/models/configs',
-                    mount_path='/TPC-FastSim/models/configs', sync_on_start=True,
+                    bucket=Constants.airflow_bucket,
+                    remote_path=f'/tmp/{model_dir_template}/models/configs',
+                    mount_path='/TPC-FastSim/models/configs',
+                    sync_on_start=True,
                 ),
                 DockerOperatorRemoteMapping(
-                    bucket=Constants.datasets_bucket, remote_path=f'/{dataset_dir_template}',
-                    mount_path='/TPC-FastSim/data/data_v4', sync_on_start=True,
+                    bucket=Constants.datasets_bucket,
+                    remote_path=f'/{dataset_dir_template}',
+                    mount_path='/TPC-FastSim/data/data_v4',
+                    sync_on_start=True,
                 ),
                 DockerOperatorRemoteMapping(
-                    bucket=Constants.saved_models_bucket, remote_path=f'/intermediate/{model_dir_template}',
-                    mount_path='/TPC-FastSim/saved_models', sync_on_finish=True
-                )
+                    bucket=Constants.saved_models_bucket,
+                    remote_path=f'/intermediate/{model_dir_template}',
+                    mount_path='/TPC-FastSim/saved_models',
+                    sync_on_finish=True,
+                ),
             ],
             command=[
-                'sh', '-c',
+                'sh',
+                '-c',
                 f'python run_model_v4.py --checkpoint_name {params["model_name"]}_{model_dir_template} '
                 f'--config models/configs/model.yaml --logging_dir s3://{Constants.tensorboard_bucket}/logs',
             ],
@@ -150,20 +183,28 @@ def create_train_model_dag(dag_id='train-model'):
             **common_train_args,
             remote_mappings=[
                 DockerOperatorRemoteMapping(
-                    bucket=Constants.airflow_bucket, remote_path=f'/tmp/{model_dir_template}/models/configs',
-                    mount_path='/TPC-FastSim/models/configs', sync_on_start=True,
+                    bucket=Constants.airflow_bucket,
+                    remote_path=f'/tmp/{model_dir_template}/models/configs',
+                    mount_path='/TPC-FastSim/models/configs',
+                    sync_on_start=True,
                 ),
                 DockerOperatorRemoteMapping(
-                    bucket=Constants.datasets_bucket, remote_path=f'/{dataset_dir_template}',
-                    mount_path='/TPC-FastSim/data/data_v4', sync_on_start=True,
+                    bucket=Constants.datasets_bucket,
+                    remote_path=f'/{dataset_dir_template}',
+                    mount_path='/TPC-FastSim/data/data_v4',
+                    sync_on_start=True,
                 ),
                 DockerOperatorRemoteMapping(
-                    bucket=Constants.saved_models_bucket, remote_path=f'/intermediate/{model_dir_template}',
-                    mount_path='/TPC-FastSim/saved_models', sync_on_start=True, sync_on_finish=True
+                    bucket=Constants.saved_models_bucket,
+                    remote_path=f'/intermediate/{model_dir_template}',
+                    mount_path='/TPC-FastSim/saved_models',
+                    sync_on_start=True,
+                    sync_on_finish=True,
                 ),
             ],
             command=[
-                'sh', '-c',
+                'sh',
+                '-c',
                 f'python run_model_v4.py --checkpoint_name {params["model_name"]}_{dataset_dir_template} '
                 f'--logging_dir s3://{Constants.tensorboard_bucket}/logs',
             ],
@@ -176,7 +217,7 @@ def create_train_model_dag(dag_id='train-model'):
             op_kwargs={
                 'model_dir': model_dir_template,
                 'saved_models_bucket': Constants.saved_models_bucket,
-                'dataset_parameters': params['dataset_parameters']
+                'dataset_parameters': params['dataset_parameters'],
             },
             trigger_rule='one_success',
         )
@@ -185,16 +226,26 @@ def create_train_model_dag(dag_id='train-model'):
             task_id='trigger-convert-model',
             dag=dag,
             trigger_dag_id='convert-and-upload-model',
+            trigger_run_id='{{ dag.dag_id }}',
             conf={
                 'saved_model_dir': model_dir_template,
                 'model_name': params['model_name'],
-            }
+            },
         )
 
         get_dataset_operator >> decide_if_continue_operator
 
-        decide_if_continue_operator >> prepare_config_operator >> train_model_operator_from_start >> copy_trained_model_operator
-        decide_if_continue_operator >> train_model_operator_continue >> copy_trained_model_operator
+        (
+            decide_if_continue_operator
+            >> prepare_config_operator
+            >> train_model_operator_from_start
+            >> copy_trained_model_operator
+        )
+        (
+            decide_if_continue_operator
+            >> train_model_operator_continue
+            >> copy_trained_model_operator
+        )
         copy_trained_model_operator >> trigger_convert_model_dag
 
     return dag

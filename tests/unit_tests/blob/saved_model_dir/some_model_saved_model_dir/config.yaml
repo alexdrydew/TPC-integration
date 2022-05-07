@@ -1,0 +1,121 @@
+architecture:
+  discriminator:
+  - arguments:
+      block:
+        arguments:
+          activations:
+          - elu
+          - elu
+          - elu
+          - elu
+          - elu
+          - elu
+          dropouts:
+          - 0.02
+          - 0.02
+          - 0.02
+          - 0.02
+          - 0.02
+          - 0.02
+          filters:
+          - 16
+          - 16
+          - 32
+          - 32
+          - 64
+          - 64
+          input_shape: null
+          kernel_init: glorot_uniform
+          kernel_sizes:
+          - 3
+          - 3
+          - 3
+          - 3
+          - 3
+          - 2
+          name: discriminator_conv_block
+          output_shape:
+          - 64
+          paddings:
+          - same
+          - same
+          - same
+          - same
+          - valid
+          - valid
+          poolings:
+          - null
+          - - 1
+            - 2
+          - null
+          - 2
+          - null
+          - null
+        block_type: conv
+      concat_outputs: true
+      img_shape:
+      - 8
+      - 16
+      name: discriminator_tail
+      vector_bypass: false
+      vector_shape:
+      - 5
+    block_type: connect
+  - arguments:
+      activations:
+      - elu
+      - null
+      input_shape:
+      - 69
+      kernel_init: glorot_uniform
+      name: discriminator_head
+      output_shape: null
+      units:
+      - 128
+      - 1
+    block_type: fully_connected
+  generator:
+  - arguments:
+      activations:
+      - elu
+      - elu
+      - elu
+      - elu
+      - ' ( lambda x, shift=0.01, val=np.log10(2), v0=np.log10(2) / 10: ( tf.where(
+        x > shift, val + x - shift, v0 + tf.keras.activations.elu( x, alpha=(v0 *
+        shift / (val - v0)) ) * (val - v0) / shift ) ) )'
+      input_shape:
+      - 37
+      kernel_init: glorot_uniform
+      name: generator
+      output_shape:
+      - 8
+      - 16
+      units:
+      - 32
+      - 64
+      - 64
+      - 64
+      - 128
+    block_type: fully_connected
+batch_size: 32
+cramer: false
+data_version: data_v4
+feature_noise_decay: null
+feature_noise_power: null
+gp_lambda: 10
+gpdata_lambda: 0
+latent_dim: 32
+lr: 0.0001
+lr_schedule_rate: 0.999
+num_disc_updates: 8
+num_epochs: 6
+pad_range:
+- -3
+- 5
+save_every: 5
+scaler: logarithmic
+stochastic_stepping: true
+time_range:
+- -7
+- 9

@@ -14,38 +14,12 @@
 # KIND, either express or implied.  See the License for the
 # specific language governing permissions and limitations
 # under the License.
-#
 
-# Basic Airflow cluster configuration for CeleryExecutor with Redis and PostgreSQL.
-#
-# WARNING: This configuration is for local development. Do not use it in a production deployment.
-#
-# This configuration supports basic configuration using environment variables or an .env file
-# The following variables are supported:
-#
-# AIRFLOW_IMAGE_NAME           - Docker image name used to run Airflow.
-#                                Default: apache/airflow:2.2.5
-# AIRFLOW_UID                  - User ID in Airflow containers
-#                                Default: 50000
-# Those configurations are useful mostly in case of standalone testing/running Airflow in test/try-out mode
-#
-# _AIRFLOW_WWW_USER_USERNAME   - Username for the administrator account (if requested).
-#                                Default: airflow
-# _AIRFLOW_WWW_USER_PASSWORD   - Password for the administrator account (if requested).
-#                                Default: airflow
-# _PIP_ADDITIONAL_REQUIREMENTS - Additional PIP requirements to add when starting all containers.
-#                                Default: ''
-#
-# Feel free to modify this file to suit your needs.
----
+
 version: '3'
 x-airflow-common:
   &airflow-common
-  # In order to add custom dependencies or upgrade provider packages you can use your extended image.
-  # Comment the image line, place your Dockerfile in the directory where you placed the docker-compose.yaml
-  # and uncomment the "build" line below, Then run `docker-compose build` to build the images.
-  # image: ${AIRFLOW_IMAGE_NAME:-apache/airflow:2.2.5}
-  build: .
+  build: ${AIRFLOW_DOCKERFILE:-../docker/airflow}
   environment:
     &airflow-common-env
     AIRFLOW__CORE__EXECUTOR: CeleryExecutor
@@ -55,20 +29,19 @@ x-airflow-common:
     AIRFLOW__CORE__FERNET_KEY: ""
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: "false"
     AIRFLOW__CORE__LOAD_EXAMPLES: "false"
-    AIRFLOW__API__AUTH_BACKEND: "airflow.api.auth.backend.basic_auth"
+    AIRFLOW__API__AUTH_BACKENDS: "airflow.api.auth.backend.basic_auth"
     AIRFLOW__WEBSERVER__ENABLE_PROXY_FIX: "true"
     AIRFLOW_VAR_AIRFLOW_BUCKET: "${AIRFLOW_BUCKET}"
     AIRFLOW_VAR_DATASETS_BUCKET: "${DATASETS_BUCKET}"
     AIRFLOW_VAR_SAVED_MODELS_BUCKET: "${SAVED_MODELS_BUCKET}"
     AIRFLOW_VAR_EVALUATION_RESULTS_BUCKET: "${EVALUATION_RESULTS_BUCKET}"
     AIRFLOW_VAR_MLFLOW_HOST: "tracking-server"
-    AIRFLOW_VAR_MLFLOW_TRACKING_PORT: "${MLFLOW_PORT}"
+    AIRFLOW_VAR_MLFLOW_TRACKING_PORT: 5000
     AIRFLOW_VAR_TENSORBOARD_BUCKET: "${TENSORBOARD_BUCKET}"
-    AIRFLOW_VAR_REVERSE_PROXY_HOST: "${REVERSE_PROXY_HOST}"
-    AIRFLOW_VAR_REVERSE_PROXY_S3_PORT: "${REVERSE_PROXY_S3_PORT}"
-    AIRFLOW_CONN_S3: "s3:///?aws_access_key_id=${MINIO_ACCESS_KEY}&aws_secret_access_key=${MINIO_SECRET_ACCESS_KEY}&host=http://s3:${MINIO_PORT}"
+    AIRFLOW_VAR_REVERSE_PROXY_S3_PORT: "${MINIO_PORT}"
+    AIRFLOW_CONN_S3: "s3:///?aws_access_key_id=${MINIO_ACCESS_KEY}&aws_secret_access_key=${MINIO_SECRET_ACCESS_KEY}&host=http://s3:9000"
   volumes:
-    - ./dags:/opt/airflow/dags
+    - ${AIRFLOW_DAGS:-./dags}:/opt/airflow/dags
     - ./logs:/opt/airflow/logs
     - ./plugins:/opt/airflow/plugins
     - /var/run/docker.sock:/var/run/docker.sock
@@ -85,6 +58,7 @@ x-airflow-common:
 
 services:
   airflow_db:
+    restart: always
     image: postgres:13
     environment:
       POSTGRES_USER: ${PG_USER}
@@ -96,9 +70,9 @@ services:
       test: ["CMD", "pg_isready", "-d", "airflow", "-U", "${PG_USER}", "-h", "localhost"]
       interval: 5s
       retries: 5
-    restart: always
 
   redis:
+    restart: always
     image: redis:latest
     expose:
       - 6379
@@ -107,10 +81,10 @@ services:
       interval: 5s
       timeout: 30s
       retries: 50
-    restart: always
 
   airflow-webserver:
     <<: *airflow-common
+    restart: always
     command: webserver
     expose:
       - "8080"
@@ -119,7 +93,6 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
-    restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -127,13 +100,13 @@ services:
 
   airflow-scheduler:
     <<: *airflow-common
+    restart: always
     command: scheduler
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type SchedulerJob --hostname "$${HOSTNAME}"']
       interval: 10s
       timeout: 10s
       retries: 5
-    restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -141,11 +114,12 @@ services:
 
   airflow-worker:
     <<: *airflow-common
+    restart: always
     command: celery worker
     healthcheck:
       test:
-        - "CMD-SHELL"
-        - 'celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
+      - "CMD-SHELL"
+      - 'celery --app airflow.executors.celery_executor.app inspect ping -d "celery@$${HOSTNAME}"'
       interval: 10s
       timeout: 10s
       retries: 5
@@ -154,7 +128,6 @@ services:
       # Required to handle warm shutdown of the celery workers properly
       # See https://airflow.apache.org/docs/docker-stack/entrypoint.html#signal-propagation
       DUMB_INIT_SETSID: "0"
-    restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -162,13 +135,13 @@ services:
 
   airflow-triggerer:
     <<: *airflow-common
+    restart: always
     command: triggerer
     healthcheck:
       test: ["CMD-SHELL", 'airflow jobs check --job-type TriggererJob --hostname "$${HOSTNAME}"']
       interval: 10s
       timeout: 10s
       retries: 5
-    restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
@@ -253,6 +226,7 @@ services:
 
   airflow-cli:
     <<: *airflow-common
+    restart: always
     profiles:
       - debug
     environment:
@@ -266,6 +240,7 @@ services:
 
   flower:
     <<: *airflow-common
+    restart: always
     command: celery flower
     expose:
       - "5555"
@@ -274,13 +249,13 @@ services:
       interval: 10s
       timeout: 10s
       retries: 5
-    restart: always
     depends_on:
       <<: *airflow-common-depends-on
       airflow-init:
         condition: service_completed_successfully
 
   s3:
+    restart: always
     image: minio/minio:RELEASE.2020-12-18T03-27-42Z
     volumes:
       - minio-data:/data
@@ -303,7 +278,7 @@ services:
         condition: service_healthy
     entrypoint: >
       /bin/sh -c '
-      /usr/bin/mc config host add s3 http://s3:${MINIO_PORT} ${MINIO_ACCESS_KEY} ${MINIO_SECRET_ACCESS_KEY} --api S3v4;
+      /usr/bin/mc config host add s3 http://s3:9000 ${MINIO_ACCESS_KEY} ${MINIO_SECRET_ACCESS_KEY} --api S3v4;
       [[ ! -z "`/usr/bin/mc ls s3 | grep mlflow`" ]] || /usr/bin/mc mb s3/mlflow;
       /usr/bin/mc policy download s3/mlflow;
       [[ ! -z "`/usr/bin/mc ls s3 | grep ${SAVED_MODELS_BUCKET}`" ]] || /usr/bin/mc mb s3/${SAVED_MODELS_BUCKET};
@@ -315,6 +290,7 @@ services:
       '
 
   mlflow-db:
+    restart: always
     image: postgres:13
     environment:
       POSTGRES_USER: ${PG_USER}
@@ -326,50 +302,59 @@ services:
       test: ["CMD", "pg_isready", "-d", "mlflow", "-U", "${PG_USER}", "-h", "localhost"]
       interval: 5s
       retries: 5
-    restart: always
 
   tracking-server:
     restart: always
-    build: ../docker/mlflow
+    build: ${MLFLOW_DOCKERFILE:-../docker/mlflow}
     expose:
       - "5000"
     environment:
       - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
       - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY}
-      - MLFLOW_S3_ENDPOINT_URL=http://s3:${MINIO_PORT}
+      - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
     command: >
       mlflow server
-      --backend-store-uri postgresql+psycopg2://${PG_USER}:${PG_PASSWORD}@mlflow-db:${PG_PORT}/mlflow
+      --backend-store-uri postgresql+psycopg2://${PG_USER}:${PG_PASSWORD}@mlflow-db:5432/mlflow
       --host 0.0.0.0
       --default-artifact-root s3://mlflow/
 
   tensorboard:
     restart: always
-    build: ../docker/tensorboard
+    build: ${TENSORBOARD_DOCKERFILE:-../docker/tensorboard}
     expose:
       - "6006"
+    depends_on:
+      s3:
+        condition: service_healthy
     environment:
       - AWS_ACCESS_KEY_ID=${MINIO_ACCESS_KEY}
       - AWS_SECRET_ACCESS_KEY=${MINIO_SECRET_ACCESS_KEY}
-      - S3_ENDPOINT=http://s3:${MINIO_PORT}
+      - S3_ENDPOINT=http://s3:9000
       - S3_VERIFY_SSL=0
       - S3_USE_HTTPS=0
     command:
       --logdir s3://${TENSORBOARD_BUCKET}/logs --host 0.0.0.0
 
   nginx:
+    restart: always
     image: nginx:1.21
     ports:
       - "${MINIO_PORT}:9000"
       - "${MLFLOW_PORT}:5000"
       - "${AIRFLOW_PORT}:8080"
       - "${TENSORBOARD_PORT}:6006"
+    environment:
+      - MINIO_PORT=${MINIO_PORT}
+      - MLFLOW_PORT=${MLFLOW_PORT}
+      - AIRFLOW_PORT=${AIRFLOW_PORT}
+      - TENSORBOARD_PORT=${TENSORBOARD_PORT}
     depends_on:
       - tracking-server
       - s3
       - airflow-webserver
+      - tensorboard
     volumes:
-    - ./nginx.conf:/etc/nginx/nginx.conf
+    - ${NGINX_CONF:-./nginx.conf}:/etc/nginx/nginx.conf
 
 volumes:
   airflow-db-volume:

@@ -4,14 +4,23 @@ from airflow.models import Param
 from airflow.operators.python import PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
-from util import DagRunParam, DagRunParamsDict, DockerOperatorExtended, DockerOperatorRemoteMapping, USER_DEFINED_MACROS, Constants
+from util import (
+    DagRunParam,
+    DagRunParamsDict,
+    DockerOperatorExtended,
+    DockerOperatorRemoteMapping,
+    USER_DEFINED_MACROS,
+    Constants,
+)
 
 DEFAULT_ARGS = {
     'start_date': pendulum.now(),
 }
 
 
-def upload_dataset_parameters_to_model(model_name, saved_model_dir, model_version, mlflow_host, saved_models_bucket):
+def upload_dataset_parameters_to_model(
+    model_name, saved_model_dir, model_version, mlflow_host, saved_models_bucket
+):
     import mlflow
     from urllib.parse import urlparse
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
@@ -25,8 +34,10 @@ def upload_dataset_parameters_to_model(model_name, saved_model_dir, model_versio
 
     s3_hook = S3Hook(aws_conn_id='S3')
     s3_hook.copy_object(
-        source_bucket_name=saved_models_bucket, dest_bucket_name=bucket,
-        source_bucket_key=f'done/{saved_model_dir}/dataset.yaml', dest_bucket_key=f'{path}/dataset.yaml',
+        source_bucket_name=saved_models_bucket,
+        dest_bucket_name=bucket,
+        source_bucket_key=f'done/{saved_model_dir}/dataset.yaml',
+        dest_bucket_key=f'{path}/dataset.yaml',
     )
 
 
@@ -65,12 +76,15 @@ def create_convert_and_upload_model_dag(dag_id='convert-and-upload-model'):
             network_mode='airflow-network',
             remote_mappings=[
                 DockerOperatorRemoteMapping(
-                    bucket=Constants.saved_models_bucket, remote_path=f'/done/{params["saved_model_dir"]}',
-                    mount_path='/TPC-FastSim/saved_models', sync_on_start=True,
+                    bucket=Constants.saved_models_bucket,
+                    remote_path=f'/done/{params["saved_model_dir"]}',
+                    mount_path='/TPC-FastSim/saved_models',
+                    sync_on_start=True,
                 )
             ],
             command=[
-                'sh', '-c',
+                'sh',
+                '-c',
                 'python export_model.py '
                 f'--checkpoint_name {params["model_name"]}_{params["saved_model_dir"]} '
                 '--export_format onnx '
@@ -79,7 +93,7 @@ def create_convert_and_upload_model_dag(dag_id='convert-and-upload-model'):
                 f'--aws_secret_access_key {Constants.s3_secret_access_key} '
                 f'--mlflow_url {Constants.mlflow_host} '
                 f'--s3_url {Constants.s3_host} '
-                f'--mlflow_model_name {params["model_name"]} '
+                f'--mlflow_model_name {params["model_name"]} ',
             ],
         )
 
@@ -90,7 +104,7 @@ def create_convert_and_upload_model_dag(dag_id='convert-and-upload-model'):
             op_kwargs={
                 'model_name': params['model_name'],
                 'mlflow_host': Constants.mlflow_host,
-            }
+            },
         )
 
         upload_dataset_parameters_to_model_operator = PythonOperator(
@@ -103,20 +117,26 @@ def create_convert_and_upload_model_dag(dag_id='convert-and-upload-model'):
                 'model_version': '{{ task_instance.xcom_pull("get-last-version") }}',
                 'mlflow_host': Constants.mlflow_host,
                 'saved_models_bucket': Constants.saved_models_bucket,
-            }
+            },
         )
 
         trigger_evaluation_operator = TriggerDagRunOperator(
             task_id='trigger-evaluate-model',
             dag=dag,
             trigger_dag_id='evaluate-model',
+            trigger_run_id='{{ dag.dag_id }}',
             conf={
                 'model_name': params['model_name'],
                 'model_version': '{{ task_instance.xcom_pull("get-last-version") }}',
-            }
+            },
         )
 
-        convert_operator >> get_version_operator >> upload_dataset_parameters_to_model_operator >> trigger_evaluation_operator
+        (
+            convert_operator
+            >> get_version_operator
+            >> upload_dataset_parameters_to_model_operator
+            >> trigger_evaluation_operator
+        )
 
     return dag
 

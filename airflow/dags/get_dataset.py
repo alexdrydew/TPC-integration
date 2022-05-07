@@ -2,7 +2,15 @@ import pendulum
 from airflow.models import Param
 from airflow.operators.dummy import DummyOperator
 
-from util import DockerOperatorExtended, DockerOperatorRemoteMapping, Constants, Templates, USER_DEFINED_MACROS, DagRunParam, DagRunParamsDict
+from util import (
+    DockerOperatorExtended,
+    DockerOperatorRemoteMapping,
+    Constants,
+    Templates,
+    USER_DEFINED_MACROS,
+    DagRunParam,
+    DagRunParamsDict,
+)
 
 from airflow import DAG
 from airflow.operators.python import BranchPythonOperator
@@ -34,7 +42,7 @@ def create_get_dataset_operators(dag: DAG, params: DagRunParamsDict):
         op_kwargs={
             'dataset_dir': dataset_dir_template,
             'datasets_bucket': Constants.datasets_bucket,
-        }
+        },
     )
 
     create_dataset_operator = DockerOperatorExtended(
@@ -42,17 +50,23 @@ def create_get_dataset_operators(dag: DAG, params: DagRunParamsDict):
         dag=dag,
         image='alexdrydew/mpdroot',
         docker_url='unix://var/run/docker.sock',
-        remote_mappings=[DockerOperatorRemoteMapping(
-            bucket=Constants.datasets_bucket, remote_path='/', mount_path='/remote_output', sync_on_finish=True
-        )],
+        remote_mappings=[
+            DockerOperatorRemoteMapping(
+                bucket=Constants.datasets_bucket,
+                remote_path='/',
+                mount_path='/remote_output',
+                sync_on_finish=True,
+            )
+        ],
         command=[
             # TODO: fake dataset generation
-            'sh', '-c',
+            'sh',
+            '-c',
             'git clone https://github.com/SiLiKhon/TPC-FastSim.git && '
             f'mkdir -p /remote_output/{dataset_dir_template}/raw && '
             f'cp -r TPC-FastSim/data/data_v4/raw/* /remote_output/{dataset_dir_template}/raw && '
-            'chmod -R 777 /remote_output'
-        ]
+            'chmod -R 777 /remote_output',
+        ],
     )
 
     convert_dataset_operator = DockerOperatorExtended(
@@ -62,15 +76,21 @@ def create_get_dataset_operators(dag: DAG, params: DagRunParamsDict):
         docker_url='unix://var/run/docker.sock',
         remote_mappings=[
             DockerOperatorRemoteMapping(
-                bucket=Constants.datasets_bucket, remote_path=f'/{dataset_dir_template}',
-                mount_path='/TPC-FastSim/data/data_v4', sync_on_start=True
+                bucket=Constants.datasets_bucket,
+                remote_path=f'/{dataset_dir_template}',
+                mount_path='/TPC-FastSim/data/data_v4',
+                sync_on_start=True,
             ),
             DockerOperatorRemoteMapping(
-                bucket=Constants.datasets_bucket, remote_path=f'/{dataset_dir_template}',
-                mount_path='/new_data', sync_on_finish=True
-            )],
+                bucket=Constants.datasets_bucket,
+                remote_path=f'/{dataset_dir_template}',
+                mount_path='/new_data',
+                sync_on_finish=True,
+            ),
+        ],
         command=[
-            'sh', '-c',
+            'sh',
+            '-c',
             'python -c '
             '"'
             'from data import preprocessing; from pathlib import Path;'
@@ -79,24 +99,33 @@ def create_get_dataset_operators(dag: DAG, params: DagRunParamsDict):
             'output_path.parent.mkdir(exist_ok=True, parents=True);'
             'preprocessing.raw_to_csv(fname_out=str(output_path));'
             '" && '
-            'chmod -R 777 /new_data'
+            'chmod -R 777 /new_data',
         ],
     )
 
-    dataset_ready = DummyOperator(task_id='dataset-ready', dag=dag, trigger_rule='one_success')
+    dataset_ready = DummyOperator(
+        task_id='dataset-ready', dag=dag, trigger_rule='one_success'
+    )
 
-    dataset_exists_operator >> create_dataset_operator >> convert_dataset_operator >> dataset_ready
+    (
+        dataset_exists_operator
+        >> create_dataset_operator
+        >> convert_dataset_operator
+        >> dataset_ready
+    )
     # "do-nothing" is needed to prevent skipping all downstream graph in case "create-dataset" execution
-    dataset_exists_operator >> DummyOperator(task_id='do-nothing', dag=dag) >> dataset_ready
+    (
+        dataset_exists_operator
+        >> DummyOperator(task_id='do-nothing', dag=dag)
+        >> dataset_ready
+    )
 
     return dataset_ready
 
 
 def create_get_dataset_dag(dag_id='get-dataset', schedule_interval=None):
 
-    params = DagRunParamsDict(
-        DagRunParam(name='dataset_parameters', dag_param=Param())
-    )
+    params = DagRunParamsDict(DagRunParam(name='dataset_parameters', dag_param=Param(default=dict(), type='object')))
 
     dag = DAG(
         dag_id,

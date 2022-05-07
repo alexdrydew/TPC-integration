@@ -24,7 +24,6 @@ def get_aws_credentials():
     return credentials
 
 
-
 class Constants:
     airflow_bucket = '{{ var.value.airflow_bucket }}'
     saved_models_bucket = '{{ var.value.saved_models_bucket }}'
@@ -36,7 +35,9 @@ class Constants:
     s3_host = get_aws_credentials()['host']
     mlflow_hostname = '{{ var.value.mlflow_host }}'
     mlflow_port = '{{ var.value.mlflow_tracking_port }}'
-    mlflow_host = 'http://{{ var.value.mlflow_host }}:{{ var.value.mlflow_tracking_port }}'
+    mlflow_host = (
+        'http://{{ var.value.mlflow_host }}:{{ var.value.mlflow_tracking_port }}'
+    )
     s3_access_key = get_aws_credentials()["aws_access_key_id"]
     s3_secret_access_key = get_aws_credentials()["aws_secret_access_key"]
     reverse_proxy_s3_host = 'http://{{ var.value.reverse_proxy_host }}:{{ var.value.reverse_proxy_s3_port }}'
@@ -44,6 +45,7 @@ class Constants:
 
 def dict_hash(params):
     import uuid
+
     return str(uuid.uuid5(uuid.NAMESPACE_OID, json.dumps(params, sort_keys=True)))
 
 
@@ -56,12 +58,16 @@ USER_DEFINED_MACROS = {
 class Templates:
     @classmethod
     def dataset_dir(cls, dataset_parameters_template: str):
-        dataset_parameters_template = dataset_parameters_template.lstrip('{').rstrip('}')
+        dataset_parameters_template = dataset_parameters_template.lstrip('{').rstrip(
+            '}'
+        )
         return f'{{{{ dict_hash({dataset_parameters_template}) }}}}'
 
     @classmethod
     def model_dir(cls, dataset_parameters_template: str, model_config_template: str):
-        dataset_parameters_template = dataset_parameters_template.lstrip('{').rstrip('}')
+        dataset_parameters_template = dataset_parameters_template.lstrip('{').rstrip(
+            '}'
+        )
         model_config_template = model_config_template.lstrip('{').rstrip('}')
         dict_template = f"{{'dataset_params': {dataset_parameters_template}, 'model_config': {model_config_template}}}"
         return f'{{{{ dict_hash({dict_template}) }}}}'
@@ -82,13 +88,17 @@ class DagRunParamsDict:
         self.params = {param.name: param for param in params}
 
     def dag_params_view(self):
-        return {param_name: param.dag_param for param_name, param in self.params.items()}
+        return {
+            param_name: param.dag_param for param_name, param in self.params.items()
+        }
 
     def __getitem__(self, item):
         return self.params[item].template
 
 
-def s3_to_local_folder(s3_conn_id: str, s3_bucket: str, s3_path: Union[PosixPath, str], local_path: Path):
+def s3_to_local_folder(
+    s3_conn_id: str, s3_bucket: str, s3_path: Union[PosixPath, str], local_path: Path
+):
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
     s3 = S3Hook(s3_conn_id)
@@ -97,20 +107,30 @@ def s3_to_local_folder(s3_conn_id: str, s3_bucket: str, s3_path: Union[PosixPath
     local_path.mkdir(parents=True, exist_ok=True)
 
     if s3.check_for_key(str(s3_path), bucket_name=s3_bucket):
-        downloaded = s3.download_file(bucket_name=s3_bucket, key=str(s3_path), local_path=str(local_path))
+        downloaded = s3.download_file(
+            bucket_name=s3_bucket, key=str(s3_path), local_path=str(local_path)
+        )
         (local_path / downloaded).rename(local_path / s3_path.name)
     elif s3.check_for_prefix(str(s3_path), '/', bucket_name=s3_bucket):
         keys = s3.list_keys(bucket_name=s3_bucket, prefix=str(s3_path))
         for key in keys:
             filepath = PosixPath(key).relative_to(s3_path)
-            downloaded = s3.download_file(bucket_name=s3_bucket, key=key, local_path=str(local_path))
+            downloaded = s3.download_file(
+                bucket_name=s3_bucket, key=key, local_path=str(local_path)
+            )
             (local_path / filepath).parent.mkdir(exist_ok=True, parents=True)
             (local_path / downloaded).rename(local_path / filepath)
     else:
         raise ValueError(f'{s3_path} is neither a key nor a prefix in {s3_bucket}.')
 
 
-def local_folder_to_s3(s3_conn_id: str, s3_bucket: str, s3_path: Union[PosixPath, str], local_path: Path, replace=True):
+def local_folder_to_s3(
+    s3_conn_id: str,
+    s3_bucket: str,
+    s3_path: Union[PosixPath, str],
+    local_path: Path,
+    replace=True,
+):
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
     s3 = S3Hook(s3_conn_id)
@@ -119,9 +139,16 @@ def local_folder_to_s3(s3_conn_id: str, s3_bucket: str, s3_path: Union[PosixPath
     if local_path.is_dir():
         for sub_path in local_path.rglob('*.*'):
             key = s3_path / local_path.name / sub_path.relative_to(local_path)
-            s3.load_file(filename=sub_path, key=str(key), bucket_name=s3_bucket, replace=replace)
+            s3.load_file(
+                filename=sub_path, key=str(key), bucket_name=s3_bucket, replace=replace
+            )
     else:
-        s3.load_file(filename=local_path, key=str(s3_path / local_path.name), bucket_name=s3_bucket, replace=replace)
+        s3.load_file(
+            filename=local_path,
+            key=str(s3_path / local_path.name),
+            bucket_name=s3_bucket,
+            replace=replace,
+        )
 
 
 @dataclasses.dataclass
@@ -143,13 +170,17 @@ class DockerOperatorExtended(DockerOperator):
         remote_mappings: List[DockerOperatorRemoteMapping] = None,
         device_requests: List[DeviceRequest] = None,
         map_output_on_fail=False,
-        **kwargs
+        **kwargs,
     ):
         self.map_output_on_fail = map_output_on_fail
         self.remote_mappings = remote_mappings or []
         mounts = kwargs.get('mounts', [])
 
-        mounts.append(Mount(source='/etc/passwd', target='/etc/passwd', read_only=True, type='bind'))
+        mounts.append(
+            Mount(
+                source='/etc/passwd', target='/etc/passwd', read_only=True, type='bind'
+            )
+        )
 
         for mount in mounts:
             mount.template_fields = ('Source', 'Target', 'Type')
@@ -185,7 +216,9 @@ class DockerOperatorExtended(DockerOperator):
                 for tmp_dir, mapping in tmp_dirs_to_mappings.items():
                     if mapping.sync_on_finish:
                         for subfolder in tmp_dir.iterdir():
-                            local_folder_to_s3('S3', mapping.bucket, mapping.remote_path, subfolder)
+                            local_folder_to_s3(
+                                'S3', mapping.bucket, mapping.remote_path, subfolder
+                            )
                     shutil.rmtree(tmp_dir)
 
         self.mounts = initial_mounts
@@ -224,7 +257,9 @@ class DockerOperatorExtended(DockerOperator):
             working_dir=self.working_dir,
             tty=self.tty,
         )
-        logstream = self.cli.attach(container=self.container['Id'], stdout=True, stderr=True, stream=True)
+        logstream = self.cli.attach(
+            container=self.container['Id'], stdout=True, stderr=True, stream=True
+        )
         try:
             self.cli.start(self.container['Id'])
 
@@ -237,7 +272,9 @@ class DockerOperatorExtended(DockerOperator):
             result = self.cli.wait(self.container['Id'])
             if result['StatusCode'] != 0:
                 joined_log_lines = "\n".join(log_lines)
-                raise AirflowException(f'Docker container failed: {repr(result)} lines {joined_log_lines}')
+                raise AirflowException(
+                    f'Docker container failed: {repr(result)} lines {joined_log_lines}'
+                )
 
             if self.retrieve_output:
                 return self._attempt_to_retrieve_result()
@@ -250,9 +287,15 @@ class DockerOperatorExtended(DockerOperator):
                 }
                 try:
                     if self.xcom_all:
-                        return [stringify(line).strip() for line in self.cli.logs(**log_parameters)]
+                        return [
+                            stringify(line).strip()
+                            for line in self.cli.logs(**log_parameters)
+                        ]
                     else:
-                        lines = [stringify(line).strip() for line in self.cli.logs(**log_parameters, tail=1)]
+                        lines = [
+                            stringify(line).strip()
+                            for line in self.cli.logs(**log_parameters, tail=1)
+                        ]
                         return lines[-1] if lines else None
                 except StopIteration:
                     # handle the case when there is not a single line to iterate on

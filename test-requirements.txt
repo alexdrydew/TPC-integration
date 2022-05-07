@@ -1,0 +1,5 @@
+pytest
+docker-compose
+apache-airflow==2.3.0
+apache-airflow-providers-amazon
+moto[s3,server]
