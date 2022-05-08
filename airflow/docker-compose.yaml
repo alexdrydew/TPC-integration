@@ -41,6 +41,7 @@ x-airflow-common:
     AIRFLOW_VAR_REVERSE_PROXY_HOST: "${REVERSE_PROXY_HOST}"
     AIRFLOW_VAR_REVERSE_PROXY_S3_PORT: "${MINIO_PORT}"
     AIRFLOW_CONN_S3: "s3:///?aws_access_key_id=${MINIO_ACCESS_KEY}&aws_secret_access_key=${MINIO_SECRET_ACCESS_KEY}&host=http://s3:9000"
+    TRAIN_ON_GPU: "${TRAIN_ON_GPU}"
   volumes:
     - ${AIRFLOW_DAGS:-./dags}:/opt/airflow/dags
     - ./logs:/opt/airflow/logs

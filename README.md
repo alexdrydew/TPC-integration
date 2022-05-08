@@ -10,6 +10,14 @@ sudo usermod -aG docker airflow
 AIRFLOW_UID=`id -u airflow` DOCKER_GID=`cut -d: -f3 < <(getent group docker)` envsubst < airflow/.env.template > airflow/.env
 ```
 
+Set `REVERSE_PROXY_HOST` value in `airflow/.env` to desired public hostname or ip address
+(current host should be accessible by it over http).  
+
+If you want to use GPU during training edit `airflow/.env`:
+```bash
+TRAIN_ON_GPU=true
+```
+
 ## Run tests:
 ```bash
 pip install -r test-requirements

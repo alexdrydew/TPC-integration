@@ -14,7 +14,7 @@ from util import (
 )
 
 DEFAULT_ARGS = {
-    'start_date': pendulum.now(),
+    "start_date": pendulum.now(),
 }
 
 
@@ -30,14 +30,14 @@ def upload_dataset_parameters_to_model(
     parsed_uri = urlparse(uri)
 
     bucket = parsed_uri.netloc
-    path = parsed_uri.path.lstrip('/')
+    path = parsed_uri.path.lstrip("/")
 
-    s3_hook = S3Hook(aws_conn_id='S3')
+    s3_hook = S3Hook(aws_conn_id="S3")
     s3_hook.copy_object(
         source_bucket_name=saved_models_bucket,
         dest_bucket_name=bucket,
-        source_bucket_key=f'done/{saved_model_dir}/dataset.yaml',
-        dest_bucket_key=f'{path}/dataset.yaml',
+        source_bucket_key=f"done/{saved_model_dir}/dataset.yaml",
+        dest_bucket_key=f"{path}/dataset.yaml",
     )
 
 
@@ -50,11 +50,11 @@ def get_last_version(model_name, mlflow_host):
     return new_version
 
 
-def create_convert_and_upload_model_dag(dag_id='convert-and-upload-model'):
+def create_convert_and_upload_model_dag(dag_id="convert-and-upload-model"):
 
     params = DagRunParamsDict(
-        DagRunParam(name='saved_model_dir', dag_param=Param(default=str)),
-        DagRunParam(name='model_name', dag_param=Param(default=str)),
+        DagRunParam(name="saved_model_dir", dag_param=Param(default=str)),
+        DagRunParam(name="model_name", dag_param=Param(default=str)),
     )
 
     dag = DAG(
@@ -69,65 +69,65 @@ def create_convert_and_upload_model_dag(dag_id='convert-and-upload-model'):
 
     with dag:
         convert_operator = DockerOperatorExtended(
-            task_id='convert-and-upload',
+            task_id="convert-and-upload",
             dag=dag,
-            image='alexdrydew/tpc-trainer:latest',
-            docker_url='unix://var/run/docker.sock',
-            network_mode='airflow-network',
+            image="alexdrydew/tpc-trainer:latest",
+            docker_url="unix://var/run/docker.sock",
+            network_mode="airflow-network",
             remote_mappings=[
                 DockerOperatorRemoteMapping(
                     bucket=Constants.saved_models_bucket,
                     remote_path=f'/done/{params["saved_model_dir"]}',
-                    mount_path='/TPC-FastSim/saved_models',
+                    mount_path="/TPC-FastSim/saved_models",
                     sync_on_start=True,
                 )
             ],
             command=[
-                'sh',
-                '-c',
-                'python export_model.py '
+                "sh",
+                "-c",
+                "python export_model.py "
                 f'--checkpoint_name {params["model_name"]}_{params["saved_model_dir"]} '
-                '--export_format onnx '
-                '--upload_to_mlflow '
-                f'--aws_access_key_id {Constants.s3_access_key} '
-                f'--aws_secret_access_key {Constants.s3_secret_access_key} '
-                f'--mlflow_url {Constants.mlflow_host} '
-                f'--s3_url {Constants.s3_host} '
+                "--export_format onnx "
+                "--upload_to_mlflow "
+                f"--aws_access_key_id {Constants.s3_access_key} "
+                f"--aws_secret_access_key {Constants.s3_secret_access_key} "
+                f"--mlflow_url {Constants.mlflow_host} "
+                f"--s3_url {Constants.s3_host} "
                 f'--mlflow_model_name {params["model_name"]} ',
             ],
         )
 
         get_version_operator = PythonOperator(
-            task_id='get-last-version',
+            task_id="get-last-version",
             dag=dag,
             python_callable=get_last_version,
             op_kwargs={
-                'model_name': params['model_name'],
-                'mlflow_host': Constants.mlflow_host,
+                "model_name": params["model_name"],
+                "mlflow_host": Constants.mlflow_host,
             },
         )
 
         upload_dataset_parameters_to_model_operator = PythonOperator(
-            task_id='upload-dataset-parameters',
+            task_id="upload-dataset-parameters",
             dag=dag,
             python_callable=upload_dataset_parameters_to_model,
             op_kwargs={
-                'model_name': params['model_name'],
-                'saved_model_dir': params['saved_model_dir'],
-                'model_version': '{{ task_instance.xcom_pull("get-last-version") }}',
-                'mlflow_host': Constants.mlflow_host,
-                'saved_models_bucket': Constants.saved_models_bucket,
+                "model_name": params["model_name"],
+                "saved_model_dir": params["saved_model_dir"],
+                "model_version": '{{ task_instance.xcom_pull("get-last-version") }}',
+                "mlflow_host": Constants.mlflow_host,
+                "saved_models_bucket": Constants.saved_models_bucket,
             },
         )
 
         trigger_evaluation_operator = TriggerDagRunOperator(
-            task_id='trigger-evaluate-model',
+            task_id="trigger-evaluate-model",
             dag=dag,
-            trigger_dag_id='evaluate-model',
-            trigger_run_id='{{ dag_run.run_id  }}',
+            trigger_dag_id="evaluate-model",
+            trigger_run_id="{{ dag_run.run_id  }}",
             conf={
-                'model_name': params['model_name'],
-                'model_version': '{{ task_instance.xcom_pull("get-last-version") }}',
+                "model_name": params["model_name"],
+                "model_version": '{{ task_instance.xcom_pull("get-last-version") }}',
             },
         )
 

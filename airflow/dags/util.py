@@ -17,30 +17,30 @@ from docker.types import DeviceRequest, Mount
 def get_aws_credentials():
     from urllib.parse import urlparse
 
-    credentials = json.loads(BaseHook.get_connection('S3').get_extra())
-    parsed = urlparse(credentials['host'])
-    credentials['hostname'] = parsed.hostname
-    credentials['port'] = parsed.port
+    credentials = json.loads(BaseHook.get_connection("S3").get_extra())
+    parsed = urlparse(credentials["host"])
+    credentials["hostname"] = parsed.hostname
+    credentials["port"] = parsed.port
     return credentials
 
 
 class Constants:
-    airflow_bucket = '{{ var.value.airflow_bucket }}'
-    saved_models_bucket = '{{ var.value.saved_models_bucket }}'
-    datasets_bucket = '{{ var.value.datasets_bucket }}'
-    evaluation_results_bucket = '{{ var.value.evaluation_results_bucket }}'
-    tensorboard_bucket = '{{ var.value.tensorboard_bucket }}'
-    s3_hostname = get_aws_credentials()['hostname']
-    s3_port = get_aws_credentials()['port']
-    s3_host = get_aws_credentials()['host']
-    mlflow_hostname = '{{ var.value.mlflow_host }}'
-    mlflow_port = '{{ var.value.mlflow_tracking_port }}'
+    airflow_bucket = "{{ var.value.airflow_bucket }}"
+    saved_models_bucket = "{{ var.value.saved_models_bucket }}"
+    datasets_bucket = "{{ var.value.datasets_bucket }}"
+    evaluation_results_bucket = "{{ var.value.evaluation_results_bucket }}"
+    tensorboard_bucket = "{{ var.value.tensorboard_bucket }}"
+    s3_hostname = get_aws_credentials()["hostname"]
+    s3_port = get_aws_credentials()["port"]
+    s3_host = get_aws_credentials()["host"]
+    mlflow_hostname = "{{ var.value.mlflow_host }}"
+    mlflow_port = "{{ var.value.mlflow_tracking_port }}"
     mlflow_host = (
-        'http://{{ var.value.mlflow_host }}:{{ var.value.mlflow_tracking_port }}'
+        "http://{{ var.value.mlflow_host }}:{{ var.value.mlflow_tracking_port }}"
     )
     s3_access_key = get_aws_credentials()["aws_access_key_id"]
     s3_secret_access_key = get_aws_credentials()["aws_secret_access_key"]
-    reverse_proxy_s3_host = 'http://{{ var.value.reverse_proxy_host }}:{{ var.value.reverse_proxy_s3_port }}'
+    reverse_proxy_s3_host = "http://{{ var.value.reverse_proxy_host }}:{{ var.value.reverse_proxy_s3_port }}"
 
 
 def dict_hash(params):
@@ -50,27 +50,27 @@ def dict_hash(params):
 
 
 USER_DEFINED_MACROS = {
-    'dict_hash': dict_hash,
-    'get_aws_credentials': get_aws_credentials,
+    "dict_hash": dict_hash,
+    "get_aws_credentials": get_aws_credentials,
 }
 
 
 class Templates:
     @classmethod
     def dataset_dir(cls, dataset_parameters_template: str):
-        dataset_parameters_template = dataset_parameters_template.lstrip('{').rstrip(
-            '}'
+        dataset_parameters_template = dataset_parameters_template.lstrip("{").rstrip(
+            "}"
         )
-        return f'{{{{ dict_hash({dataset_parameters_template}) }}}}'
+        return f"{{{{ dict_hash({dataset_parameters_template}) }}}}"
 
     @classmethod
     def model_dir(cls, dataset_parameters_template: str, model_config_template: str):
-        dataset_parameters_template = dataset_parameters_template.lstrip('{').rstrip(
-            '}'
+        dataset_parameters_template = dataset_parameters_template.lstrip("{").rstrip(
+            "}"
         )
-        model_config_template = model_config_template.lstrip('{').rstrip('}')
+        model_config_template = model_config_template.lstrip("{").rstrip("}")
         dict_template = f"{{'dataset_params': {dataset_parameters_template}, 'model_config': {model_config_template}}}"
-        return f'{{{{ dict_hash({dict_template}) }}}}'
+        return f"{{{{ dict_hash({dict_template}) }}}}"
 
 
 @dataclasses.dataclass
@@ -102,7 +102,7 @@ def s3_to_local_folder(
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
     s3 = S3Hook(s3_conn_id)
-    s3_path = PosixPath(s3_path).relative_to('/')
+    s3_path = PosixPath(s3_path).relative_to("/")
 
     local_path.mkdir(parents=True, exist_ok=True)
 
@@ -111,7 +111,7 @@ def s3_to_local_folder(
             bucket_name=s3_bucket, key=str(s3_path), local_path=str(local_path)
         )
         (local_path / downloaded).rename(local_path / s3_path.name)
-    elif s3.check_for_prefix(str(s3_path), '/', bucket_name=s3_bucket):
+    elif s3.check_for_prefix(str(s3_path), "/", bucket_name=s3_bucket):
         keys = s3.list_keys(bucket_name=s3_bucket, prefix=str(s3_path))
         for key in keys:
             filepath = PosixPath(key).relative_to(s3_path)
@@ -121,7 +121,7 @@ def s3_to_local_folder(
             (local_path / filepath).parent.mkdir(exist_ok=True, parents=True)
             (local_path / downloaded).rename(local_path / filepath)
     else:
-        raise ValueError(f'{s3_path} is neither a key nor a prefix in {s3_bucket}.')
+        raise ValueError(f"{s3_path} is neither a key nor a prefix in {s3_bucket}.")
 
 
 def local_folder_to_s3(
@@ -134,10 +134,10 @@ def local_folder_to_s3(
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
     s3 = S3Hook(s3_conn_id)
-    s3_path = PosixPath(s3_path).relative_to('/')
+    s3_path = PosixPath(s3_path).relative_to("/")
 
     if local_path.is_dir():
-        for sub_path in local_path.rglob('*.*'):
+        for sub_path in local_path.rglob("*.*"):
             key = s3_path / local_path.name / sub_path.relative_to(local_path)
             s3.load_file(
                 filename=sub_path, key=str(key), bucket_name=s3_bucket, replace=replace
@@ -153,7 +153,7 @@ def local_folder_to_s3(
 
 @dataclasses.dataclass
 class DockerOperatorRemoteMapping:
-    template_fields = ('bucket', 'remote_path', 'mount_path')
+    template_fields = ("bucket", "remote_path", "mount_path")
 
     bucket: str
     remote_path: str
@@ -163,7 +163,7 @@ class DockerOperatorRemoteMapping:
 
 
 class DockerOperatorExtended(DockerOperator):
-    template_fields = (*DockerOperator.template_fields, 'remote_mappings', 'mounts')
+    template_fields = (*DockerOperator.template_fields, "remote_mappings", "mounts")
 
     def __init__(
         self,
@@ -174,26 +174,26 @@ class DockerOperatorExtended(DockerOperator):
     ):
         self.map_output_on_fail = map_output_on_fail
         self.remote_mappings = remote_mappings or []
-        mounts = kwargs.get('mounts', [])
+        mounts = kwargs.get("mounts", [])
 
         mounts.append(
             Mount(
-                source='/etc/passwd', target='/etc/passwd', read_only=True, type='bind'
+                source="/etc/passwd", target="/etc/passwd", read_only=True, type="bind"
             )
         )
 
         for mount in mounts:
-            mount.template_fields = ('Source', 'Target', 'Type')
-        kwargs['mounts'] = mounts
+            mount.template_fields = ("Source", "Target", "Type")
+        kwargs["mounts"] = mounts
 
         self.device_requests = device_requests
-        user = kwargs.pop('user', None)
-        assert user is None, f'User is not supported in {type(self)}.'
-        kwargs['user'] = os.getuid()
+        user = kwargs.pop("user", None)
+        assert user is None, f"User is not supported in {type(self)}."
+        kwargs["user"] = os.getuid()
 
         super().__init__(**kwargs)
 
-    def execute(self, context: 'Context') -> Optional[str]:
+    def execute(self, context: "Context") -> Optional[str]:
         initial_mounts = list(self.mounts)
 
         tmp_dirs_to_mappings = {}
@@ -201,9 +201,9 @@ class DockerOperatorExtended(DockerOperator):
             tmp_dir = Path(tempfile.mkdtemp(dir=self.host_tmp_dir))
             tmp_dirs_to_mappings[tmp_dir] = mapping
             if mapping.sync_on_start:
-                s3_to_local_folder('S3', mapping.bucket, mapping.remote_path, tmp_dir)
+                s3_to_local_folder("S3", mapping.bucket, mapping.remote_path, tmp_dir)
             self.mounts.append(
-                Mount(source=str(tmp_dir), target=str(mapping.mount_path), type='bind')
+                Mount(source=str(tmp_dir), target=str(mapping.mount_path), type="bind")
             )
 
         failed = True
@@ -217,7 +217,7 @@ class DockerOperatorExtended(DockerOperator):
                     if mapping.sync_on_finish:
                         for subfolder in tmp_dir.iterdir():
                             local_folder_to_s3(
-                                'S3', mapping.bucket, mapping.remote_path, subfolder
+                                "S3", mapping.bucket, mapping.remote_path, subfolder
                             )
                     shutil.rmtree(tmp_dir)
 
@@ -228,9 +228,9 @@ class DockerOperatorExtended(DockerOperator):
         self, target_mounts, add_tmp_variable: bool
     ) -> Optional[Union[List[str], str]]:
         if add_tmp_variable:
-            self.environment['AIRFLOW_TMP_DIR'] = self.tmp_dir
+            self.environment["AIRFLOW_TMP_DIR"] = self.tmp_dir
         else:
-            self.environment.pop('AIRFLOW_TMP_DIR', None)
+            self.environment.pop("AIRFLOW_TMP_DIR", None)
         if not self.cli:
             raise Exception("The 'cli' should be initialized before!")
         self.container = self.cli.create_container(
@@ -258,10 +258,10 @@ class DockerOperatorExtended(DockerOperator):
             tty=self.tty,
         )
         logstream = self.cli.attach(
-            container=self.container['Id'], stdout=True, stderr=True, stream=True
+            container=self.container["Id"], stdout=True, stderr=True, stream=True
         )
         try:
-            self.cli.start(self.container['Id'])
+            self.cli.start(self.container["Id"])
 
             log_lines = []
             for log_chunk in logstream:
@@ -269,21 +269,21 @@ class DockerOperatorExtended(DockerOperator):
                 log_lines.append(log_chunk)
                 self.log.info("%s", log_chunk)
 
-            result = self.cli.wait(self.container['Id'])
-            if result['StatusCode'] != 0:
+            result = self.cli.wait(self.container["Id"])
+            if result["StatusCode"] != 0:
                 joined_log_lines = "\n".join(log_lines)
                 raise AirflowException(
-                    f'Docker container failed: {repr(result)} lines {joined_log_lines}'
+                    f"Docker container failed: {repr(result)} lines {joined_log_lines}"
                 )
 
             if self.retrieve_output:
                 return self._attempt_to_retrieve_result()
             elif self.do_xcom_push:
                 log_parameters = {
-                    'container': self.container['Id'],
-                    'stdout': True,
-                    'stderr': True,
-                    'stream': True,
+                    "container": self.container["Id"],
+                    "stdout": True,
+                    "stderr": True,
+                    "stream": True,
                 }
                 try:
                     if self.xcom_all:
@@ -303,4 +303,4 @@ class DockerOperatorExtended(DockerOperator):
             return None
         finally:
             if self.auto_remove:
-                self.cli.remove_container(self.container['Id'])
+                self.cli.remove_container(self.container["Id"])

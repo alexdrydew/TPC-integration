@@ -18,17 +18,17 @@ from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 
 DEFAULT_ARGS = {
-    'start_date': pendulum.now(),
+    "start_date": pendulum.now(),
 }
 
 
 def dataset_exists(dataset_dir, datasets_bucket):
 
-    s3 = S3Hook(aws_conn_id='S3')
+    s3 = S3Hook(aws_conn_id="S3")
 
-    if not s3.check_for_prefix(str(dataset_dir), '/', bucket_name=datasets_bucket):
-        return 'create-dataset'
-    return 'do-nothing'
+    if not s3.check_for_prefix(str(dataset_dir), "/", bucket_name=datasets_bucket):
+        return "create-dataset"
+    return "do-nothing"
 
 
 def create_get_dataset_operators(dag: DAG, params: DagRunParamsDict):
@@ -36,75 +36,75 @@ def create_get_dataset_operators(dag: DAG, params: DagRunParamsDict):
     dataset_dir_template = Templates.dataset_dir(params["dataset_parameters"])
 
     dataset_exists_operator = BranchPythonOperator(
-        task_id='check-dataset-exists',
+        task_id="check-dataset-exists",
         dag=dag,
         python_callable=dataset_exists,
         op_kwargs={
-            'dataset_dir': dataset_dir_template,
-            'datasets_bucket': Constants.datasets_bucket,
+            "dataset_dir": dataset_dir_template,
+            "datasets_bucket": Constants.datasets_bucket,
         },
     )
 
     create_dataset_operator = DockerOperatorExtended(
-        task_id='create-dataset',
+        task_id="create-dataset",
         dag=dag,
-        image='alexdrydew/mpdroot',
-        docker_url='unix://var/run/docker.sock',
+        image="alexdrydew/mpdroot",
+        docker_url="unix://var/run/docker.sock",
         remote_mappings=[
             DockerOperatorRemoteMapping(
                 bucket=Constants.datasets_bucket,
-                remote_path='/',
-                mount_path='/remote_output',
+                remote_path="/",
+                mount_path="/remote_output",
                 sync_on_finish=True,
             )
         ],
         command=[
             # TODO: fake dataset generation
-            'sh',
-            '-c',
-            'git clone https://github.com/SiLiKhon/TPC-FastSim.git && '
-            f'mkdir -p /remote_output/{dataset_dir_template}/raw && '
-            f'cp -r TPC-FastSim/data/data_v4/raw/* /remote_output/{dataset_dir_template}/raw && '
-            'chmod -R 777 /remote_output',
+            "sh",
+            "-c",
+            "git clone https://github.com/SiLiKhon/TPC-FastSim.git && "
+            f"mkdir -p /remote_output/{dataset_dir_template}/raw && "
+            f"cp -r TPC-FastSim/data/data_v4/raw/* /remote_output/{dataset_dir_template}/raw && "
+            "chmod -R 777 /remote_output",
         ],
     )
 
     convert_dataset_operator = DockerOperatorExtended(
-        task_id='convert-dataset',
+        task_id="convert-dataset",
         dag=dag,
-        image='alexdrydew/tpc-trainer:latest',
-        docker_url='unix://var/run/docker.sock',
+        image="alexdrydew/tpc-trainer:latest",
+        docker_url="unix://var/run/docker.sock",
         remote_mappings=[
             DockerOperatorRemoteMapping(
                 bucket=Constants.datasets_bucket,
-                remote_path=f'/{dataset_dir_template}',
-                mount_path='/TPC-FastSim/data/data_v4',
+                remote_path=f"/{dataset_dir_template}",
+                mount_path="/TPC-FastSim/data/data_v4",
                 sync_on_start=True,
             ),
             DockerOperatorRemoteMapping(
                 bucket=Constants.datasets_bucket,
-                remote_path=f'/{dataset_dir_template}',
-                mount_path='/new_data',
+                remote_path=f"/{dataset_dir_template}",
+                mount_path="/new_data",
                 sync_on_finish=True,
             ),
         ],
         command=[
-            'sh',
-            '-c',
-            'python -c '
+            "sh",
+            "-c",
+            "python -c "
             '"'
-            'from data import preprocessing; from pathlib import Path;'
+            "from data import preprocessing; from pathlib import Path;"
             "preprocessing._VERSION = 'data_v4';"
             "output_path = Path('/new_data/csv/digits.csv');"
-            'output_path.parent.mkdir(exist_ok=True, parents=True);'
-            'preprocessing.raw_to_csv(fname_out=str(output_path));'
+            "output_path.parent.mkdir(exist_ok=True, parents=True);"
+            "preprocessing.raw_to_csv(fname_out=str(output_path));"
             '" && '
-            'chmod -R 777 /new_data',
+            "chmod -R 777 /new_data",
         ],
     )
 
     dataset_ready = DummyOperator(
-        task_id='dataset-ready', dag=dag, trigger_rule='one_success'
+        task_id="dataset-ready", dag=dag, trigger_rule="one_success"
     )
 
     (
@@ -116,16 +116,20 @@ def create_get_dataset_operators(dag: DAG, params: DagRunParamsDict):
     # "do-nothing" is needed to prevent skipping all downstream graph in case "create-dataset" execution
     (
         dataset_exists_operator
-        >> DummyOperator(task_id='do-nothing', dag=dag)
+        >> DummyOperator(task_id="do-nothing", dag=dag)
         >> dataset_ready
     )
 
     return dataset_ready
 
 
-def create_get_dataset_dag(dag_id='get-dataset', schedule_interval=None):
+def create_get_dataset_dag(dag_id="get-dataset", schedule_interval=None):
 
-    params = DagRunParamsDict(DagRunParam(name='dataset_parameters', dag_param=Param(default=dict(), type='object')))
+    params = DagRunParamsDict(
+        DagRunParam(
+            name="dataset_parameters", dag_param=Param(default=dict(), type="object")
+        )
+    )
 
     dag = DAG(
         dag_id,
