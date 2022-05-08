@@ -1,6 +1,5 @@
 {
   "model_name": "baseline",
-  "model_version": 1,
   "dataset_parameters": {
     "sample": 10
   },

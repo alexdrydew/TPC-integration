@@ -18,6 +18,7 @@ RUN git config user.email 'docker@example.com'
 RUN git reset --hard 7de367f
 # custom logs folder support
 RUN git cherry-pick 89d6d2e
+RUN git cherry-pick b8f5cab
 RUN chmod -R 777 /TPC-FastSim
 COPY /entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh

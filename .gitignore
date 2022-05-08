@@ -6,3 +6,5 @@
 !*Dockerfile
 !*.yaml
 !*.yml
+!airflow/.env
+!airflow/.env.template

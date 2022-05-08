@@ -1,8 +1,16 @@
+## Requirements
+
+`docker-compose>=1.27.0`
+
+## Install
+
 ```bash
 sudo useradd airflow
+sudo usermod -aG docker airflow
+AIRFLOW_UID=`id -u airflow` DOCKER_GID=`cut -d: -f3 < <(getent group docker)` envsubst < airflow/.env.template > airflow/.env
 ```
 
-Run tests:
+## Run tests:
 ```bash
 pip install -r test-requirements
 # generate python client for airflow 2.3.0 using OpenAPI
