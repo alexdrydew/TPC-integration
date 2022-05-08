@@ -1,6 +1,12 @@
+import os
 import time
 
+import boto3
+import mlflow
+import numpy as np
+import onnxruntime
 import pytest
+import requests
 from airflow_client.client.api import dag_api, dag_run_api, task_instance_api
 from airflow_client.client.model.dag_run import DAGRun
 from airflow_client.client.model.dag_state import DagState
@@ -10,13 +16,18 @@ from airflow_client.client.model.task_state import TaskState
 def run_dag_until_complete(airflow_client_instance, dag_id, conf):
     api_instance = dag_run_api.DAGRunApi(airflow_client_instance)
     dag_run = api_instance.post_dag_run(dag_id, DAGRun(conf=conf))
-    dag_run = api_instance.get_dag_run(
-        dag_id=dag_id, dag_run_id=dag_run.dag_run_id
+    dag_run = wait_dag_run_until_complete(api_instance, dag_run)
+    return dag_run
+
+
+def wait_dag_run_until_complete(dag_run_api_instance, dag_run):
+    dag_run = dag_run_api_instance.get_dag_run(
+        dag_id=dag_run.dag_id, dag_run_id=dag_run.dag_run_id
     )
     while dag_run.state == DagState('running') or dag_run.state == DagState('queued'):
         time.sleep(1)
-        dag_run = api_instance.get_dag_run(
-            dag_id=dag_id, dag_run_id=dag_run.dag_run_id
+        dag_run = dag_run_api_instance.get_dag_run(
+            dag_id=dag_run.dag_id, dag_run_id=dag_run.dag_run_id
         )
     return dag_run
 
@@ -173,8 +184,61 @@ def model_config():
     }
 
 
-def test_train_model(
-    run_docker_compose, airflow_client_instance, generated_dataset_params, model_config
+@pytest.fixture(scope='session')
+def trained_model(run_docker_compose, airflow_client_instance, generated_dataset_params, model_config):
+    dag_run = run_dag_until_complete(
+        airflow_client_instance, 'train-model',
+        {
+            'model_name': 'test',
+            'model_config': model_config,
+            'dataset_parameters': generated_dataset_params,
+            'ignore_saves': False,
+        }
+    )
+    return dag_run
+
+
+def test_trained_model_successful(airflow_client_instance, trained_model, s3_access_key_id, s3_secret_access_key, hostname, ports, buckets_names):
+    api_instance = task_instance_api.TaskInstanceApi(airflow_client_instance)
+    task_instances_collection = api_instance.get_task_instances(
+        dag_id='train-model', dag_run_id=trained_model.dag_run_id,
+    )
+    expected_states = {
+        'prepare-config': 'success',
+        'decide-if-continue': 'success',
+        'train-model-from-start': 'success',
+        'train-model-continue': 'skipped',
+        'copy-to-done': 'success',
+        'trigger-convert-model': 'success',
+    }
+
+    for task_instance in task_instances_collection.task_instances:
+        if task_instance.task_id in expected_states:
+            assert TaskState(expected_states[task_instance.task_id]) == task_instance.state, \
+                f'Task {task_instance.task_id} is in state {task_instance.state}'
+
+    trigger_task = api_instance.get_task_instance(
+        dag_id='train-model', dag_run_id=trained_model.dag_run_id, task_id='trigger-convert-model'
+    )
+    model_dir = trigger_task.rendered_fields['conf']['saved_model_dir']
+
+    check_model_dir(buckets_names, hostname, model_dir, ports, s3_access_key_id, s3_secret_access_key)
+
+
+def check_model_dir(buckets_names, hostname, model_dir, ports, s3_access_key_id, s3_secret_access_key):
+    s3_resource = boto3.resource(
+        service_name='s3',
+        aws_access_key_id=s3_access_key_id,
+        aws_secret_access_key=s3_secret_access_key,
+        endpoint_url=f'http://{hostname}:{ports["MINIO_PORT"]}',
+    )
+    bucket = s3_resource.Bucket(buckets_names['saved_models_bucket'])
+    s3_files = list(bucket.objects.filter(Prefix=f"done/{model_dir}/"))
+    assert s3_files
+
+
+def test_train_model_continued(
+    airflow_client_instance, generated_dataset_params, model_config, trained_model, buckets_names, hostname, ports, s3_access_key_id, s3_secret_access_key
 ):
     dag_run = run_dag_until_complete(
         airflow_client_instance, 'train-model',
@@ -182,9 +246,108 @@ def test_train_model(
             'model_name': 'test',
             'model_config': model_config,
             'dataset_parameters': generated_dataset_params,
+            'ignore_saves': False,
         }
     )
     api_instance = task_instance_api.TaskInstanceApi(airflow_client_instance)
     task_instances_collection = api_instance.get_task_instances(
         dag_id='train-model', dag_run_id=dag_run.dag_run_id,
     )
+    expected_states = {
+        'prepare-config': 'skipped',
+        'decide-if-continue': 'success',
+        'train-model-from-start': 'skipped',
+        'train-model-continue': 'success',
+        'copy-to-done': 'success',
+        'trigger-convert-model': 'success',
+    }
+
+    for task_instance in task_instances_collection.task_instances:
+        if task_instance.task_id in expected_states:
+            assert TaskState(expected_states[task_instance.task_id]) == task_instance.state, \
+                f'Task {task_instance.task_id} is in state {task_instance.state}'
+
+    trigger_task = api_instance.get_task_instance(
+        dag_id='train-model', dag_run_id=dag_run.dag_run_id, task_id='trigger-convert-model'
+    )
+    model_dir = trigger_task.rendered_fields['conf']['saved_model_dir']
+    check_model_dir(buckets_names, hostname, model_dir, ports, s3_access_key_id, s3_secret_access_key)
+
+
+@pytest.fixture(scope='session')
+def triggered_convert_model(airflow_client_instance, trained_model):
+    api_instance = dag_run_api.DAGRunApi(airflow_client_instance)
+    convert_dag_run = api_instance.get_dag_run('convert-and-upload-model', dag_run_id=trained_model.dag_run_id)
+    convert_dag_run = wait_dag_run_until_complete(api_instance, convert_dag_run)
+    return convert_dag_run
+
+
+def test_triggered_convert_model_successful(airflow_client_instance, triggered_convert_model):
+    assert triggered_convert_model.state == DagState('success')
+    task_api_instance = task_instance_api.TaskInstanceApi(airflow_client_instance)
+    task_instances_collection = task_api_instance.get_task_instances(
+        dag_id='convert-and-upload-model', dag_run_id=triggered_convert_model.dag_run_id
+    )
+    for task_instance in task_instances_collection.task_instances:
+        assert task_instance.state == TaskState('success')
+
+
+@pytest.fixture(scope='session')
+def set_mlflow_s3_credentials(s3_access_key_id, s3_secret_access_key, hostname, ports):
+    os.environ['AWS_ACCESS_KEY_ID'] = s3_access_key_id
+    os.environ['AWS_SECRET_ACCESS_KEY'] = s3_secret_access_key
+    os.environ['MLFLOW_S3_ENDPOINT_URL'] = f'http://{hostname}:{ports["MINIO_PORT"]}'
+
+
+def test_model_is_uploaded_to_mlflow(triggered_convert_model, airflow_client_instance, hostname, ports, set_mlflow_s3_credentials):
+    task_api_instance = task_instance_api.TaskInstanceApi(airflow_client_instance)
+    trigger_evaluation_task = task_api_instance.get_task_instance(
+        dag_id=triggered_convert_model.dag_id, dag_run_id=triggered_convert_model.dag_run_id,
+        task_id='trigger-evaluate-model'
+    )
+
+    conf = trigger_evaluation_task.rendered_fields['conf']
+    model_version, model_name = conf['model_version'], conf['model_name']
+
+    client = mlflow.tracking.MlflowClient(tracking_uri=f'http://{hostname}:{ports["MLFLOW_PORT"]}')
+    run_id = client.get_model_version(model_name, model_version).run_id
+    artifacts = client.list_artifacts(run_id, 'model_onnx')
+    assert len(artifacts) == 6
+
+
+@pytest.fixture(scope='session')
+def triggered_evaluate_model(airflow_client_instance, triggered_convert_model):
+    api_instance = dag_run_api.DAGRunApi(airflow_client_instance)
+    evaluate_dag_run = api_instance.get_dag_run('evaluate-model', dag_run_id=triggered_convert_model.dag_run_id)
+    evaluate_dag_run = wait_dag_run_until_complete(api_instance, evaluate_dag_run)
+    return evaluate_dag_run
+
+
+def test_triggered_evaluate_model_successful(airflow_client_instance, triggered_evaluate_model, hostname, ports, set_mlflow_s3_credentials):
+    assert triggered_evaluate_model.state == DagState('success')
+    task_api_instance = task_instance_api.TaskInstanceApi(airflow_client_instance)
+    task_instances_collection = task_api_instance.get_task_instances(
+        dag_id='evaluate-model', dag_run_id=triggered_evaluate_model.dag_run_id
+    )
+    for task_instance in task_instances_collection.task_instances:
+        assert task_instance.state == TaskState('success')
+
+    client = mlflow.tracking.MlflowClient(tracking_uri=f'http://{hostname}:{ports["MLFLOW_PORT"]}')
+
+    model_version, model_name = int(triggered_evaluate_model.conf['model_version']), triggered_evaluate_model.conf['model_name']
+    assert len(client.get_model_version(model_name, model_version).description) > 0
+
+
+def test_result_model_raw_requested(airflow_client_instance, triggered_evaluate_model, hostname, ports, set_mlflow_s3_credentials):
+    model_name = triggered_evaluate_model.conf['model_name']
+
+    model_version = int(triggered_evaluate_model.conf['model_version'])
+
+    download_uri = requests.get(
+        f'http://{hostname}:{ports["MLFLOW_PORT"]}/api/2.0/preview/mlflow/model-versions/get-download-uri?name={model_name}&version={model_version}'
+    ).json()['artifact_uri']
+    s3_path = (download_uri + '/model.onnx').replace('s3://', '/')
+
+    onnx_model = requests.get(f'http://{hostname}:{ports["MINIO_PORT"]}' + s3_path).content
+    session = onnxruntime.InferenceSession(onnx_model)
+    session.run(None, {'x': np.ones((1, 4), dtype=np.float32)})

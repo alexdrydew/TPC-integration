@@ -124,7 +124,7 @@ def create_convert_and_upload_model_dag(dag_id='convert-and-upload-model'):
             task_id='trigger-evaluate-model',
             dag=dag,
             trigger_dag_id='evaluate-model',
-            trigger_run_id='{{ dag.dag_id }}',
+            trigger_run_id='{{ dag_run.run_id  }}',
             conf={
                 'model_name': params['model_name'],
                 'model_version': '{{ task_instance.xcom_pull("get-last-version") }}',

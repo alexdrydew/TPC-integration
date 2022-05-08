@@ -205,7 +205,7 @@ def create_train_model_dag(dag_id='train-model'):
             command=[
                 'sh',
                 '-c',
-                f'python run_model_v4.py --checkpoint_name {params["model_name"]}_{dataset_dir_template} '
+                f'python run_model_v4.py --checkpoint_name {params["model_name"]}_{model_dir_template} '
                 f'--logging_dir s3://{Constants.tensorboard_bucket}/logs',
             ],
         )
@@ -226,7 +226,7 @@ def create_train_model_dag(dag_id='train-model'):
             task_id='trigger-convert-model',
             dag=dag,
             trigger_dag_id='convert-and-upload-model',
-            trigger_run_id='{{ dag.dag_id }}',
+            trigger_run_id='{{ dag_run.run_id  }}',
             conf={
                 'saved_model_dir': model_dir_template,
                 'model_name': params['model_name'],

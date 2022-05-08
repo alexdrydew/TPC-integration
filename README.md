@@ -17,6 +17,8 @@ cp ../../../airflow/v1.yaml ../airflow/api_connexion/openapi/v1.yaml
 python ../../../add_auth_to_openapi.py --config ../airflow/api_connexion/openapi/v1.yaml --auth_options Basic
 ./gen/python.sh ../airflow/api_connexion/openapi/v1.yaml ../../airflow_client/
 cd ../../..
+pip install attrs==20.3.0
+pip install cattrs==1.1.1
 pip install ./airflow-client-python --no-cache --force
 rm -r airflow-client-python
 
