@@ -40,7 +40,7 @@ class Constants:
     )
     s3_access_key = get_aws_credentials()["aws_access_key_id"]
     s3_secret_access_key = get_aws_credentials()["aws_secret_access_key"]
-    reverse_proxy_s3_host = "http://{{ var.value.reverse_proxy_host }}:{{ var.value.reverse_proxy_s3_port }}"
+    reverse_proxy_host = "http://{{ var.value.reverse_proxy_host }}:{{ var.value.reverse_proxy_s3_port }}"
 
 
 def dict_hash(params):

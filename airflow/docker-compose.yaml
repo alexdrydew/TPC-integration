@@ -226,20 +226,6 @@ services:
     volumes:
       - .:/sources
 
-  airflow-cli:
-    <<: *airflow-common
-    restart: always
-    profiles:
-      - debug
-    environment:
-      <<: *airflow-common-env
-      CONNECTION_CHECK_MAX_COUNT: "0"
-    # Workaround for entrypoint issue. See: https://github.com/apache/airflow/issues/16252
-    command:
-      - bash
-      - -c
-      - airflow
-
   flower:
     <<: *airflow-common
     restart: always
@@ -286,6 +272,7 @@ services:
       [[ ! -z "`/usr/bin/mc ls s3 | grep ${SAVED_MODELS_BUCKET}`" ]] || /usr/bin/mc mb s3/${SAVED_MODELS_BUCKET};
       [[ ! -z "`/usr/bin/mc ls s3 | grep ${DATASETS_BUCKET}`" ]] || /usr/bin/mc mb s3/${DATASETS_BUCKET};
       [[ ! -z "`/usr/bin/mc ls s3 | grep ${EVALUATION_RESULTS_BUCKET}`" ]] || /usr/bin/mc mb s3/${EVALUATION_RESULTS_BUCKET};
+      /usr/bin/mc policy download s3/${EVALUATION_RESULTS_BUCKET};
       [[ ! -z "`/usr/bin/mc ls s3 | grep ${AIRFLOW_BUCKET}`" ]] || /usr/bin/mc mb s3/${AIRFLOW_BUCKET};
       [[ ! -z "`/usr/bin/mc ls s3 | grep ${TENSORBOARD_BUCKET}`" ]] || /usr/bin/mc mb s3/${TENSORBOARD_BUCKET};
       exit 0;

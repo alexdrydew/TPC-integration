@@ -1,7 +1,8 @@
 import pendulum
 from airflow import DAG
 from airflow.models import Param
-from airflow.operators.python import PythonOperator
+from airflow.operators.dummy import DummyOperator
+from airflow.operators.python import BranchPythonOperator, PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
 from util import (
@@ -48,6 +49,18 @@ def get_last_version(model_name, mlflow_host):
     new_version = client.get_latest_versions(model_name)[0].version
 
     return new_version
+
+
+def has_dataset_parameters(saved_model_dir, saved_models_bucket):
+    from airflow.providers.amazon.aws.hooks.s3 import S3Hook
+
+    s3_hook = S3Hook(aws_conn_id="S3")
+    if s3_hook.check_for_key(
+        f"done/{saved_model_dir}/dataset.yaml", saved_models_bucket
+    ):
+        return "upload-dataset-parameters"
+    else:
+        return "dataset-parameters-unknown"
 
 
 def create_convert_and_upload_model_dag(dag_id="convert-and-upload-model"):
@@ -107,6 +120,20 @@ def create_convert_and_upload_model_dag(dag_id="convert-and-upload-model"):
             },
         )
 
+        has_dataset_params_operator = BranchPythonOperator(
+            task_id="has-dataset-params",
+            dag=dag,
+            python_callable=has_dataset_parameters,
+            op_kwargs={
+                "saved_model_dir": params["saved_model_dir"],
+                "saved_models_bucket": Constants.saved_models_bucket,
+            },
+        )
+
+        dataset_parameters_unknown_operator = DummyOperator(
+            task_id="dataset-parameters-unknown", dag=dag
+        )
+
         upload_dataset_parameters_to_model_operator = PythonOperator(
             task_id="upload-dataset-parameters",
             dag=dag,
@@ -129,12 +156,21 @@ def create_convert_and_upload_model_dag(dag_id="convert-and-upload-model"):
                 "model_name": params["model_name"],
                 "model_version": '{{ task_instance.xcom_pull("get-last-version") }}',
             },
+            trigger_rule="one_success",
         )
 
         (
             convert_operator
             >> get_version_operator
+            >> has_dataset_params_operator
             >> upload_dataset_parameters_to_model_operator
+            >> trigger_evaluation_operator
+        )
+
+        (
+            get_version_operator
+            >> has_dataset_params_operator
+            >> dataset_parameters_unknown_operator
             >> trigger_evaluation_operator
         )
 

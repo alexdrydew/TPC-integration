@@ -27,7 +27,7 @@ def update_mlflow_description(
     evaluation_results_bucket,
     evaluation_results_dir,
     mlflow_host,
-    reverse_proxy_s3_host,
+    reverse_proxy_host,
 ):
     import mlflow
     from io import StringIO
@@ -35,9 +35,11 @@ def update_mlflow_description(
     def create_description():
         sio = StringIO()
         sio.write(
-            f"![]({reverse_proxy_s3_host}/{evaluation_results_bucket}/{evaluation_results_dir}/test_results.png)\n"
+            "#Reconstruction data\n"
+            f"<{reverse_proxy_host}/{evaluation_results_bucket}/{evaluation_results_dir}/mpddst.root>\n"
+            "#Training logs\n"
+            f""
         )
-        sio.write("Some data...")
         return sio.getvalue()
 
     client = mlflow.tracking.MlflowClient(registry_uri=mlflow_host)
@@ -94,8 +96,8 @@ def create_evaluate_model_dag(dag_id="evaluate-model"):
             command=[
                 "sh",
                 "-c",
-                "cd macro/mpd && root -l -b -q runMC.C && root -l -b -q reco.C && "
-                f"curl -o /evaluation_results/test_results.png http://mlflow.org/images/MLflow-logo-final-white-TM.png",
+                "cd macro/mpd && root -l -b -q runMC.C && "
+                "root -l -b -q reco.C && cp mpddst.root /evaluation_results/mpddst.root",
             ],
         )
 
@@ -109,7 +111,7 @@ def create_evaluate_model_dag(dag_id="evaluate-model"):
                 "evaluation_results_bucket": Constants.evaluation_results_bucket,
                 "evaluation_results_dir": evaluation_results_dir_template,
                 "mlflow_host": Constants.mlflow_host,
-                "reverse_proxy_s3_host": Constants.reverse_proxy_s3_host,
+                "reverse_proxy_host": Constants.reverse_proxy_host,
             },
         )
 

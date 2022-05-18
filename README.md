@@ -1,6 +1,6 @@
 ## Requirements
 
-`docker-compose>=1.27.0`
+`docker-compose>=1.29.2`
 
 ## Install
 
@@ -16,6 +16,13 @@ Set `REVERSE_PROXY_HOST` value in `airflow/.env` to desired public hostname or i
 If you want to use GPU during training edit `airflow/.env`:
 ```bash
 TRAIN_ON_GPU=true
+```
+
+## Run pipeline
+
+```bash
+cd airflow
+docker-compose up
 ```
 
 ## Run tests:
