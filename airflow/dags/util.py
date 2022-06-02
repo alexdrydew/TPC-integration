@@ -4,7 +4,7 @@ import os
 import shutil
 import tempfile
 from pathlib import Path, PosixPath
-from typing import Optional, Union, List
+from typing import Dict, Optional, Union, List
 
 from airflow import AirflowException
 from airflow.hooks.base import BaseHook
@@ -14,7 +14,9 @@ from airflow.models import Param
 from docker.types import DeviceRequest, Mount
 
 
-def get_aws_credentials():
+def get_aws_credentials() -> Dict[str, str]:
+    """Returns dict with credentials for "S3" connection.
+    """
     from urllib.parse import urlparse
 
     credentials = json.loads(BaseHook.get_connection("S3").get_extra())
@@ -25,6 +27,9 @@ def get_aws_credentials():
 
 
 class Constants:
+    """Constants for usage in templated fields.
+    """
+
     airflow_bucket = "{{ var.value.airflow_bucket }}"
     saved_models_bucket = "{{ var.value.saved_models_bucket }}"
     datasets_bucket = "{{ var.value.datasets_bucket }}"
@@ -43,7 +48,10 @@ class Constants:
     reverse_proxy_host = "http://{{ var.value.reverse_proxy_host }}:{{ var.value.reverse_proxy_s3_port }}"
 
 
-def dict_hash(params):
+def dict_hash(params: Dict):
+    """Calculates UUID for arbitrary dict.
+    """
+
     import uuid
 
     return str(uuid.uuid5(uuid.NAMESPACE_OID, json.dumps(params, sort_keys=True)))
@@ -56,6 +64,9 @@ USER_DEFINED_MACROS = {
 
 
 class Templates:
+    """Functions to retrieve macros result using templated arguments.
+    """
+
     @classmethod
     def dataset_dir(cls, dataset_parameters_template: str):
         dataset_parameters_template = dataset_parameters_template.lstrip("{").rstrip(
@@ -75,6 +86,13 @@ class Templates:
 
 @dataclasses.dataclass
 class DagRunParam:
+    """Utility class for dag parameter.
+
+    Attributes:
+        name: name of the parameter
+        dag_param: airflow.models.Param parameter description
+    """
+
     name: str
     dag_param: Param
 
@@ -84,10 +102,26 @@ class DagRunParam:
 
 
 class DagRunParamsDict:
+    """Utility class for dag parameters dict.
+
+    Supports indexing operator for getting representation to be used in template as well as dag_params_view method to be
+    used in DAG initialization.
+    """
+
     def __init__(self, *params: DagRunParam):
         self.params = {param.name: param for param in params}
 
     def dag_params_view(self):
+        """Returns representation to be used in DAG(params=...)
+
+        Examples:
+            params = DagRunParamsDict(
+                DagRunParam(name="param1", dag_param=Param(default=str)),
+                DagRunParam(name="param2", dag_param=Param(default=int)),
+            )
+
+            dag = DAG(dag_id, schedule_interval=None, params=params.dag_params_view())
+        """
         return {
             param_name: param.dag_param for param_name, param in self.params.items()
         }
@@ -99,6 +133,16 @@ class DagRunParamsDict:
 def s3_to_local_folder(
     s3_conn_id: str, s3_bucket: str, s3_path: Union[PosixPath, str], local_path: Path
 ):
+    """Copies s3 path to local folder. Logic is similar to cp utility.
+
+    Args:
+        s3_conn_id: connection id.
+        s3_bucket: bucket name.
+        s3_path: path in s3 (either in form /dir/subdir/file or dir/subdir/file, file can be either a directory or a
+            filename).
+        local_path: path to local target folder.
+    """
+
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
     s3 = S3Hook(s3_conn_id)
@@ -131,6 +175,16 @@ def local_folder_to_s3(
     local_path: Path,
     replace=True,
 ):
+    """Copies files from local folder or file to s3 target prefix. Logic is similar to cp utility.
+
+    Args:
+        s3_conn_id: connection id.
+        s3_bucket: bucket name.
+        s3_path: path in s3 (either in form /dir/subdir or dir/subdir).
+        local_path: path to local target folder or file.
+        replace: if True replaces files in S3, if False ignore operation if file is present
+    """
+
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
     s3 = S3Hook(s3_conn_id)
@@ -153,6 +207,16 @@ def local_folder_to_s3(
 
 @dataclasses.dataclass
 class DockerOperatorRemoteMapping:
+    """A mapping from S3 prefix to Docker mounted directory
+
+    Attributes:
+        bucket: S3 bucket name.
+        remote_path: prefix in S3 to be mounted.
+        mount_path: path of mounted directory inside container.
+        sync_on_start: copy files from S3 prefix to mounted folder on start.
+        sync_on_finish: copy files from mounted folder to S3 on finish.
+    """
+
     template_fields = ("bucket", "remote_path", "mount_path")
 
     bucket: str
@@ -163,6 +227,16 @@ class DockerOperatorRemoteMapping:
 
 
 class DockerOperatorExtended(DockerOperator):
+    """DockerOperator extension which supports device requests, mounts templating and mounting S3 directories inside
+     container.
+
+    Args:
+        remote_mappings: list of DockerOperatorRemoteMapping that defines remote directories to be mapped inside the
+            container.
+        device_requests: list of DeviceRequest to be used in container.
+        map_output_on_fail: if True process all remote mappings' with sync_on_finish on container fail.
+    """
+
     template_fields = (*DockerOperator.template_fields, "remote_mappings", "mounts")
 
     def __init__(
@@ -176,6 +250,7 @@ class DockerOperatorExtended(DockerOperator):
         self.remote_mappings = remote_mappings or []
         mounts = kwargs.get("mounts", [])
 
+        # fix for usage of airflow user inside the container in case this user isn't present in image
         mounts.append(
             Mount(
                 source="/etc/passwd", target="/etc/passwd", read_only=True, type="bind"

@@ -1,6 +1,15 @@
+"""Airflow graph for dataset retrieval.
+
+Checks if dataset exists for supplied parameters. If dataset is already saved simply returns it. Otherwise, starts
+dataset generation process using MPDRoot Docker Container.
+
+Parameters:
+    dataset_parameters: a dictionary with arbitrary dataset parameters.
+"""
+
 import pendulum
 from airflow.models import Param
-from airflow.operators.dummy import DummyOperator
+from airflow.operators.empty import EmptyOperator
 
 from util import (
     DockerOperatorExtended,
@@ -23,6 +32,12 @@ DEFAULT_ARGS = {
 
 
 def dataset_exists(dataset_dir, datasets_bucket):
+    """Checks if dataset exists. If dataset exists return "do-nothing", otherwise returns "create-dataset".
+
+    Args:
+        dataset_dir: S3 dataset objects prefix.
+        datasets_bucket: S3 datasets bucket name.
+    """
 
     s3 = S3Hook(aws_conn_id="S3")
 
@@ -32,6 +47,8 @@ def dataset_exists(dataset_dir, datasets_bucket):
 
 
 def create_get_dataset_operators(dag: DAG, params: DagRunParamsDict):
+    """A helper function that inserts dataset creation tasks in the beginning of the supplied DAG. Returns last node in
+    the graph."""
 
     dataset_dir_template = Templates.dataset_dir(params["dataset_parameters"])
 
@@ -103,7 +120,7 @@ def create_get_dataset_operators(dag: DAG, params: DagRunParamsDict):
         ],
     )
 
-    dataset_ready = DummyOperator(
+    dataset_ready = EmptyOperator(
         task_id="dataset-ready", dag=dag, trigger_rule="one_success"
     )
 
@@ -113,10 +130,10 @@ def create_get_dataset_operators(dag: DAG, params: DagRunParamsDict):
         >> convert_dataset_operator
         >> dataset_ready
     )
-    # "do-nothing" is needed to prevent skipping all downstream graph in case "create-dataset" execution
+    # "do-nothing" is needed to prevent skipping all downstream tasks in case of "create-dataset" task execution
     (
         dataset_exists_operator
-        >> DummyOperator(task_id="do-nothing", dag=dag)
+        >> EmptyOperator(task_id="do-nothing", dag=dag)
         >> dataset_ready
     )
 

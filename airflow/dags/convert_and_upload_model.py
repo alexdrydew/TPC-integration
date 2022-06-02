@@ -1,7 +1,21 @@
+"""Airflow graph for converting, uploading and registering the model.
+
+Performs three main operations:
+* TensorFlow -> ONNX model conversion (using tf2onnx). Executed in TPC-FastSim Docker container.
+* Registering and uploading of the converted model to MLflow Model Registry.
+* Triggers evaluation graph defined in evaluate_model.py on successful completion.
+
+Parameters:
+    saved_model_dir: a prefix in S3 with a model to export.
+    model_name: desired model name in MLflow Model Registry. If the model is present in registry, the version will be
+        incremented.
+"""
+
+
 import pendulum
 from airflow import DAG
 from airflow.models import Param
-from airflow.operators.dummy import DummyOperator
+from airflow.operators.empty import EmptyOperator
 from airflow.operators.python import BranchPythonOperator, PythonOperator
 from airflow.operators.trigger_dagrun import TriggerDagRunOperator
 
@@ -22,6 +36,18 @@ DEFAULT_ARGS = {
 def upload_dataset_parameters_to_model(
     model_name, saved_model_dir, model_version, mlflow_host, saved_models_bucket
 ):
+    """Task for saving dataset parameters used during training with model in MLflow Model Registry.
+
+    Parameters are expected to be saved in intermediate trained model representation root as dataset.yaml.
+
+    Args:
+        model_name: model name in Mlflow Model Registry.
+        saved_model_dir: source directory of trained model intermediate representation.
+        model_version: model version in Mlflow Model Registry.
+        mlflow_host: MLflow URL.
+        saved_models_bucket: S3 bucket with trained model intermediate representations.
+    """
+
     import mlflow
     from urllib.parse import urlparse
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
@@ -43,6 +69,13 @@ def upload_dataset_parameters_to_model(
 
 
 def get_last_version(model_name, mlflow_host):
+    """Task for retrieving last version of the model in MLflow Model Registry.
+
+    Args:
+        model_name: model name in Mlflow Model Registry.
+        mlflow_host: MLflow URL.
+    """
+
     import mlflow
 
     client = mlflow.tracking.MlflowClient(tracking_uri=mlflow_host)
@@ -52,6 +85,17 @@ def get_last_version(model_name, mlflow_host):
 
 
 def has_dataset_parameters(saved_model_dir, saved_models_bucket):
+    """Task to be used in BranchPythonOperator. Returns upload-dataset-parameters in case of dataset parameters being
+    saved with the model, otherwise returns dataset-parameters-unknown.
+
+    Args:
+        saved_model_dir: source directory of trained model intermediate representation.
+        saved_models_bucket: S3 bucket with trained model intermediate representations.
+
+    Returns:
+
+    """
+
     from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
     s3_hook = S3Hook(aws_conn_id="S3")
@@ -130,7 +174,7 @@ def create_convert_and_upload_model_dag(dag_id="convert-and-upload-model"):
             },
         )
 
-        dataset_parameters_unknown_operator = DummyOperator(
+        dataset_parameters_unknown_operator = EmptyOperator(
             task_id="dataset-parameters-unknown", dag=dag
         )
 
@@ -159,6 +203,7 @@ def create_convert_and_upload_model_dag(dag_id="convert-and-upload-model"):
             trigger_rule="one_success",
         )
 
+        # save with dataset parameters branch
         (
             convert_operator
             >> get_version_operator
@@ -167,6 +212,7 @@ def create_convert_and_upload_model_dag(dag_id="convert-and-upload-model"):
             >> trigger_evaluation_operator
         )
 
+        # no dataset parameters branch
         (
             get_version_operator
             >> has_dataset_params_operator

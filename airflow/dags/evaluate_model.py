@@ -1,3 +1,15 @@
+"""Airflow graph for model evaluation.
+
+Performs following steps:
+* Starts MPDRoot simulation using supplied model name and version present in MLflow Model Registry using MPDRoot
+    container.
+* Uploads simulation results in S3.
+* Updates description of the model in MLflow Model Registry with the results.
+
+Parameters:
+    model_name: model name in MLflow Model Registry to evaluate.
+    model_version: model version in MLflow Model Registry to evaluate.
+"""
 from pathlib import Path
 
 import pendulum
@@ -29,15 +41,25 @@ def update_mlflow_description(
     mlflow_host,
     reverse_proxy_host,
 ):
+    """Updates model description. in MLflow Model Registry with evaluation results.
+
+    Args:
+        model_name: model name in Mlflow Model Registry.
+        model_version: model version in Mlflow Model Registry.
+        evaluation_results_bucket: S3 bucket name with the evaluation results
+        evaluation_results_dir: S3 prefix with evaluation results for the model
+        mlflow_host: MLflow URL.
+        reverse_proxy_host: reverse proxy public URL.
+    """
+
     import mlflow
     from io import StringIO
 
     def create_description():
         sio = StringIO()
         sio.write(
-            "#Reconstruction data\n"
+            "# Reconstruction data\n"
             f"<{reverse_proxy_host}/{evaluation_results_bucket}/{evaluation_results_dir}/mpddst.root>\n"
-            "#Training logs\n"
             f""
         )
         return sio.getvalue()

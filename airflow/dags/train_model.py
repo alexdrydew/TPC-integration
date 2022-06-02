@@ -1,3 +1,23 @@
+"""Airflow graph for model training and dataset creation.
+
+A combined graph of dataset creation and model training. The beginning of the graph is exactly the graph defined in
+get_dataset.py. Trains neural TPC model with supplied parameters using generated dataset inside TPC-FastSim Docker
+container.
+Key features:
+* Supports training resuming after fail.
+* Supports training on both GPU and CPU.
+* Saves training logs to S3 in real time.
+If the training is successful triggers convert-and-upload-model graph defined in convert_and_upload_model.py
+
+Parameters:
+    ignore_saves: if True starts training from the beginning even if intermediate save for the model and dataset
+        parameters is present.
+    dataset_parameters: a dictionary with arbitrary dataset parameters.
+    model_config: a dictionary with neural TPC model hyperparameters.
+    model_name: desired model name in MLflow Model Registry. If the model is present in registry, the version will be
+        incremented.
+"""
+
 import pendulum
 import os
 from airflow import DAG
@@ -25,6 +45,14 @@ DEFAULT_ARGS = {
 
 
 def create_config(model_config, model_dir, airflow_bucket):
+    """Converts model_config DAG parameter to yaml and saves it with the model.
+
+    Args:
+        model_config: dictionary with model hyperparameters.
+        model_dir: trained model intermediate representations directory.
+        airflow_bucket: S3 bucket name for temp files.
+    """
+
     import yaml
     import tempfile
     from util import local_folder_to_s3
@@ -44,6 +72,14 @@ def create_config(model_config, model_dir, airflow_bucket):
 
 
 def copy_model_to_done_folder(model_dir, saved_models_bucket, dataset_parameters):
+    """Copies model with "intermediate" S3 prefix using "done" prefix.
+
+    Args:
+        model_dir: saved model S3 prefix.
+        saved_models_bucket: S3 bucket name.
+        dataset_parameters: parameters of the dataset used during training.
+    """
+
     import yaml
     import tempfile
     from util import local_folder_to_s3
@@ -73,6 +109,15 @@ def copy_model_to_done_folder(model_dir, saved_models_bucket, dataset_parameters
 
 
 def decide_if_continue(ignore_saves, model_dir, saved_models_bucket):
+    """Checks if training should be resumed. Returns "prepare-config" if training should be started from the beginnning,
+     otherwise returns "train-model-continue"
+
+    Args:
+        ignore_saves: if True always starts training from the beginning.
+        model_dir: model saves directory.
+        saved_models_bucket: S3 bucket name for intermediate model representations.
+    """
+
     s3_hook = S3Hook(aws_conn_id="S3")
 
     if ignore_saves or not s3_hook.check_for_prefix(
@@ -144,11 +189,14 @@ def create_train_model_dag(dag_id="train-model"):
             "dag": dag,
             "image": "alexdrydew/tpc-trainer",
             "docker_url": "unix://var/run/docker.sock",
+            # GPU passthrough configuration
             "device_requests": [DeviceRequest(capabilities=[["gpu"]], count=1)]
             if os.getenv("TRAIN_ON_GPU") == "true"
             else [],
+            # save to continue training later in case of fail
             "map_output_on_fail": True,
             "network_mode": "airflow-network",
+            # S3 credentials for training logs
             "environment": {
                 "AWS_ACCESS_KEY_ID": Constants.s3_access_key,
                 "AWS_SECRET_ACCESS_KEY": Constants.s3_secret_access_key,
@@ -218,7 +266,7 @@ def create_train_model_dag(dag_id="train-model"):
                 "-c",
                 f'python run_model_v4.py --checkpoint_name {params["model_name"]}_{model_dir_template} '
                 f"--logging_dir s3://{Constants.tensorboard_bucket}/logs "
-                f"--gpu_num " + ("0" if os.getenv("TRAIN_ON_GPU") else "''"),
+                f"--gpu_num " + ("0" if os.getenv("TRAIN_ON_GPU") == "true" else "''"),
             ],
         )
 
