@@ -1,6 +1,6 @@
 """Airflow graph for dataset retrieval.
 
-Checks if dataset exists for supplied parameters. If dataset is already saved simply returns it. Otherwise, starts
+Checks if dataset exists for supplied parameters. If the dataset is already saved simply return it. Otherwise, starts
 dataset generation process using MPDRoot Docker Container.
 
 Parameters:

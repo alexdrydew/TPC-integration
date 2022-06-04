@@ -1,6 +1,6 @@
 ## Requirements
 
-`docker-compose>=1.29.2`
+`docker-compose>=1.29.2`, `envsubst`
 
 ## Install
 
@@ -28,7 +28,7 @@ docker-compose up
 ## Run tests:
 ```bash
 pip install -r test-requirements
-# generate python client for airflow 2.3.0 using OpenAPI
+# generate python client for airflow 2.3.0 using OpenAPI Generator
 git clone git@github.com:apache/airflow-client-python.git
 cd airflow-client-python
 rm -r airflow_client/*
