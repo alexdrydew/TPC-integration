@@ -40,6 +40,7 @@ x-airflow-common:
     AIRFLOW_VAR_TENSORBOARD_BUCKET: "${TENSORBOARD_BUCKET}"
     AIRFLOW_VAR_REVERSE_PROXY_HOST: "${REVERSE_PROXY_HOST}"
     AIRFLOW_VAR_REVERSE_PROXY_S3_PORT: "${MINIO_PORT}"
+    AIRFLOW_VAR_NETWORK_NAME: "${NETWORK_NAME}"
     AIRFLOW_CONN_S3: "s3:///?aws_access_key_id=${MINIO_ACCESS_KEY}&aws_secret_access_key=${MINIO_SECRET_ACCESS_KEY}&host=http://s3:9000"
     TRAIN_ON_GPU: "${TRAIN_ON_GPU}"
   volumes:
@@ -352,4 +353,4 @@ volumes:
 
 networks:
   default:
-    name: airflow-network
+    name: ${NETWORK_NAME}

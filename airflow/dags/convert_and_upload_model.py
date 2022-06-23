@@ -12,7 +12,7 @@ Parameters:
 """
 
 
-import pendulum
+import datetime
 from airflow import DAG
 from airflow.models import Param
 from airflow.operators.empty import EmptyOperator
@@ -29,7 +29,7 @@ from util import (
 )
 
 DEFAULT_ARGS = {
-    "start_date": pendulum.now(),
+    "start_date": datetime.datetime.min,
 }
 
 
@@ -130,7 +130,7 @@ def create_convert_and_upload_model_dag(dag_id="convert-and-upload-model"):
             dag=dag,
             image="alexdrydew/tpc-trainer:latest",
             docker_url="unix://var/run/docker.sock",
-            network_mode="airflow-network",
+            network_mode=Constants.network_name,
             remote_mappings=[
                 DockerOperatorRemoteMapping(
                     bucket=Constants.saved_models_bucket,

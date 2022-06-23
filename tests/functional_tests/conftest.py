@@ -95,6 +95,9 @@ def initialize_env_file(
     sio.write(f'MLFLOW_DOCKERFILE={project_root / "docker" / "mlflow"}\n')
     sio.write(f'TENSORBOARD_DOCKERFILE={project_root / "docker" / "tensorboard"}\n')
 
+    # docker compose
+    sio.write(f'NETWORK_NAME={uuid.uuid4()}')
+
     env_filepath = Path(__file__).parent / '.env'
     with open(env_filepath, 'w') as f:
         f.write(sio.getvalue())

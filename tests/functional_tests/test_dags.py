@@ -289,7 +289,8 @@ def test_triggered_convert_model_successful(airflow_client_instance, triggered_c
         dag_id='convert-and-upload-model', dag_run_id=triggered_convert_model.dag_run_id
     )
     for task_instance in task_instances_collection.task_instances:
-        assert task_instance.state == TaskState('success')
+        if task_instance.task_id != 'dataset-parameters-unknown':
+            assert task_instance.state == TaskState('success')
 
 
 @pytest.fixture(scope='session')

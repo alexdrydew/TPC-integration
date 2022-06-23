@@ -12,7 +12,7 @@ Parameters:
 """
 from pathlib import Path
 
-import pendulum
+import datetime
 from airflow import DAG
 from airflow.operators.python import PythonOperator
 from airflow.models import Param
@@ -29,7 +29,7 @@ SHARED_FOLDER = Path("/opt/airflow/shared")
 
 
 DEFAULT_ARGS = {
-    "start_date": pendulum.now(),
+    "start_date": datetime.datetime.min,
 }
 
 
@@ -98,7 +98,7 @@ def create_evaluate_model_dag(dag_id="evaluate-model"):
             dag=dag,
             image="alexdrydew/mpdroot",
             docker_url="unix://var/run/docker.sock",
-            network_mode="airflow-network",
+            network_mode=Constants.network_name,
             remote_mappings=[
                 DockerOperatorRemoteMapping(
                     remote_path=f"/{evaluation_results_dir_template}",

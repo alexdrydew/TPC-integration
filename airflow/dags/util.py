@@ -46,6 +46,7 @@ class Constants:
     s3_access_key = get_aws_credentials()["aws_access_key_id"]
     s3_secret_access_key = get_aws_credentials()["aws_secret_access_key"]
     reverse_proxy_host = "http://{{ var.value.reverse_proxy_host }}:{{ var.value.reverse_proxy_s3_port }}"
+    network_name = '{{ var.value.network_name }}'
 
 
 def dict_hash(params: Dict):
@@ -237,7 +238,7 @@ class DockerOperatorExtended(DockerOperator):
         map_output_on_fail: if True process all remote mappings' with sync_on_finish on container fail.
     """
 
-    template_fields = (*DockerOperator.template_fields, "remote_mappings", "mounts")
+    template_fields = (*DockerOperator.template_fields, "remote_mappings", "mounts", "network_mode")
 
     def __init__(
         self,

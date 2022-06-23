@@ -18,7 +18,7 @@ Parameters:
         incremented.
 """
 
-import pendulum
+import datetime
 import os
 from airflow import DAG
 from airflow.operators.python import PythonOperator, BranchPythonOperator
@@ -40,7 +40,7 @@ from util import (
 
 
 DEFAULT_ARGS = {
-    "start_date": pendulum.now(),
+    "start_date": datetime.datetime.min,
 }
 
 
@@ -195,7 +195,7 @@ def create_train_model_dag(dag_id="train-model"):
             else [],
             # save to continue training later in case of fail
             "map_output_on_fail": True,
-            "network_mode": "airflow-network",
+            "network_mode": Constants.network_name,
             # S3 credentials for training logs
             "environment": {
                 "AWS_ACCESS_KEY_ID": Constants.s3_access_key,

@@ -7,7 +7,7 @@ Parameters:
     dataset_parameters: a dictionary with arbitrary dataset parameters.
 """
 
-import pendulum
+import datetime
 from airflow.models import Param
 from airflow.operators.empty import EmptyOperator
 
@@ -27,7 +27,7 @@ from airflow.providers.amazon.aws.hooks.s3 import S3Hook
 
 
 DEFAULT_ARGS = {
-    "start_date": pendulum.now(),
+    "start_date": datetime.datetime.min,
 }
 
 
